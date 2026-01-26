@@ -206,12 +206,6 @@
             <button id="todayBtn" class="seg-btn w-full">跳到最新日</button>
           </div>
         </div>
-
-        <div class="flex flex-wrap gap-2 items-center">
-          <span id="rangeLabel" class="chip">—</span>
-          <span id="fileLabel" class="chip">—</span>
-          <span id="detailLabel" class="chip">—</span>
-        </div>
       </div>
     </div>
 
@@ -220,28 +214,23 @@
       <div class="card p-4">
         <div class="kpi-card-title">營業額（平均/日）</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiSalesSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">報廢額（平均/日）</div>
         <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiScrapAmtSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">報廢率（平均）</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiScrapRateSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">超用額（平均/日）</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiOverAmtSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">超用率（平均）</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiOverRateSub" class="subval mt-1">—</div>
-      </div>
+</div>
     </div>
 
     <!-- Top cards -->
@@ -328,8 +317,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-sm font-semibold">6) 半成品展開</div>
-            <div class="text-xs muted mt-1">排序、搜尋後可點擊列查看趨勢圖與日別明細。</div>
-          </div>
+</div>
           <div class="flex flex-wrap gap-2 items-center">
             <div class="text-xs muted">排序依據</div>
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
@@ -360,10 +348,7 @@
         <div class="table-wrap">
           <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs muted flex flex-wrap items-center justify-between gap-2">
             <div>顯示：<span id="groupCount">0</span> 筆（最多 200 筆）</div>
-            <div class="flex items-center gap-2">
-              <span class="chip">點擊列可查看趨勢＆明細</span>
-            </div>
-          </div>
+</div>
           <div class="overflow-auto max-h-[420px]">
             <table>
               <thead>
@@ -438,10 +423,6 @@
         </div>
 
       </div>
-    </div>
-
-    <div class="mt-6 text-xs muted">
-      備註：本頁使用「日別報廢率總表」計算 KPI／前10名／共用類廢棄；「各日合計」頁籤用於半成品明細展開。
     </div>
   </div>
 
@@ -791,8 +772,6 @@ async function loadAllData() {
   state.dateMax = state.summary[state.summary.length-1].date;
 
   $('dataStatus').textContent = '已載入 ' + files.length + ' 份檔案';
-  $('fileLabel').textContent = '檔案：' + files.length + ' 份（manifest.json）';
-  $('detailLabel').textContent = '明細：' + state.details.length.toLocaleString('zh-TW') + ' 筆';
 }
 
 function buildSelectors() {
@@ -966,21 +945,11 @@ function updateKPICards(srows) {
   const overRate = avgRate('overuseRate');
 
   $('kpiSales').textContent = fmtMoney(sales);
-  $('kpiSalesSub').textContent = `合計：${fmtMoney(sum('sales'))}｜天數：${n}`;
-
-  $('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
-  $('kpiScrapAmtSub').textContent = `合計：${fmtMoney(sum('scrapAmt'))}｜天數：${n}`;
-
-  $('kpiScrapRate').textContent = fmtPct(scrapRate);
-  $('kpiScrapRateSub').textContent = `參考：日均值`;
-
-  $('kpiOverAmt').textContent = fmtMoney(overAmt);
-  $('kpiOverAmtSub').textContent = `合計：${fmtMoney(sum('overuseAmt'))}｜天數：${n}`;
-
-  $('kpiOverRate').textContent = fmtPct(overRate);
-  $('kpiOverRateSub').textContent = `參考：日均值`;
-
-  // top cards
+$('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
+$('kpiScrapRate').textContent = fmtPct(scrapRate);
+$('kpiOverAmt').textContent = fmtMoney(overAmt);
+$('kpiOverRate').textContent = fmtPct(overRate);
+// top cards
   const topScrapAmt = avgAmt('topScrapAmt');
   const topScrapShare = avgRate('topScrapShare');
   $('topScrapAmt').textContent = fmtMoney(topScrapAmt);
@@ -1291,9 +1260,7 @@ function getSelectedRangeRows() {
 
 function renderAll() {
   const {start, end, srows, drows} = getSelectedRangeRows();
-
-  $('rangeLabel').textContent = `範圍：${start} ～ ${end}（${srows.length} 天）`;
-  updateKPICards(srows);
+updateKPICards(srows);
 
   renderKPIChart(srows, start, end);
   renderRightChart(srows, start, end);
