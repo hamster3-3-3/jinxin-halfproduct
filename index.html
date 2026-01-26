@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>晉欣鮮食廠｜半成品儀表板</title>
+
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap');
+    :root {
+      --bg1:#f8fafc;
+      --bg2:#eef2ff;
+      --card:#ffffff;
+      --muted:#64748b;
+      --ink:#0f172a;
+      --line:#e2e8f0;
+      --accent:#2563eb;
+      --danger:#dc2626;
+      --ok:#16a34a;
+    }
+    body {
+      font-family: 'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
+      background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
+      color: var(--ink);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      background: #fff;
+    }
+    .seg-btn {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 14px;
+      background: #fff;
+      color: #0f172a;
+      transition: all .15s ease;
+      user-select: none;
+    }
+    .seg-btn.active {
+      background: #0f172a;
+      color: #fff;
+      border-color: #0f172a;
+    }
+    .kpi-card-title {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .kpi-card-value {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .subval {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #334155;
+      text-align: left;
+      white-space: nowrap;
+    }
+    tbody td {
+      border-bottom: 1px solid #f1f5f9;
+      padding: 10px 12px;
+      font-size: 13px;
+      vertical-align: top;
+    }
+    tbody tr:hover {
+      background: #f8fafc;
+    }
+    .mono {
+      font-variant-numeric: tabular-nums;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .badge-ok {
+      display:inline-flex;align-items:center;gap:6px;
+      padding:4px 8px;border-radius:999px;
+      background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;
+      font-size:12px;
+    }
+    .badge-danger {
+      display:inline-flex;align-items:center;gap:6px;
+      padding:4px 8px;border-radius:999px;
+      background:#fef2f2;color:#991b1b;border:1px solid #fecaca;
+      font-size:12px;
+    }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      max-width: 420px;
+      background: #0f172a;
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+      display: none;
+      z-index: 50;
+    }
+    .loader {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #cbd5e1;
+      border-top-color: #0f172a;
+      border-radius: 999px;
+      animation: spin 0.8s linear infinite;
+      display:inline-block;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+
+  <!-- Local vendor scripts (GitHub Pages 同網域) -->
+  <script src="./xlsx.full.min.js"></script>
+  <script src="./chart.umd.min.js"></script>
+</head>
+
+<body class="min-h-screen">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- Header -->
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">晉欣鮮食廠｜半成品儀表板</h1>
+        <div class="text-sm muted mt-1">資料來源：晉欣半成品報廢管理表（XLSX）｜本頁更新：2026-01-26 05:49</div>
+      </div>
+      <div class="flex flex-wrap gap-2 items-center">
+        <span id="dataStatus" class="chip">尚未載入資料</span>
+        <button id="reloadBtn" class="seg-btn">重新載入</button>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="mt-4 card p-4">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="text-sm font-semibold mr-2">1) 選擇時間範圍</div>
+          <button class="seg-btn active" data-mode="year">年別</button>
+          <button class="seg-btn" data-mode="month">月別</button>
+          <button class="seg-btn" data-mode="week">週別</button>
+          <button class="seg-btn" data-mode="day">日別</button>
+          <button class="seg-btn" data-mode="range">指定範圍</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div class="md:col-span-3" id="yearWrap">
+            <label class="text-xs muted">年別</label>
+            <select id="yearSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
+          </div>
+
+          <div class="md:col-span-3 hidden" id="monthWrap">
+            <label class="text-xs muted">月別</label>
+            <select id="monthSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
+          </div>
+
+          <div class="md:col-span-4 hidden" id="weekWrap">
+            <label class="text-xs muted">週別（週二～週一）</label>
+            <select id="weekSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
+          </div>
+
+          <div class="md:col-span-3 hidden" id="dayWrap">
+            <label class="text-xs muted">日別</label>
+            <input id="daySel" type="date" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" />
+          </div>
+
+          <div class="md:col-span-5 hidden" id="rangeWrap">
+            <label class="text-xs muted">日期範圍</label>
+            <div class="mt-1 grid grid-cols-2 gap-2">
+              <input id="rangeStart" type="date" class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" />
+              <input id="rangeEnd" type="date" class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" />
+            </div>
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="text-xs muted">顯示粒度</label>
+            <select id="granSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white">
+              <option value="auto">自動</option>
+              <option value="day">日</option>
+              <option value="week">週</option>
+              <option value="month">月</option>
+            </select>
+          </div>
+
+          <div class="md:col-span-3 flex gap-2">
+            <button id="applyBtn" class="seg-btn w-full">套用</button>
+            <button id="todayBtn" class="seg-btn w-full">跳到最新日</button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2 items-center">
+          <span id="rangeLabel" class="chip">—</span>
+          <span id="fileLabel" class="chip">—</span>
+          <span id="detailLabel" class="chip">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div class="card p-4">
+        <div class="kpi-card-title">營業額（平均/日）</div>
+        <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
+        <div id="kpiSalesSub" class="subval mt-1">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="kpi-card-title">報廢額（平均/日）</div>
+        <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
+        <div id="kpiScrapAmtSub" class="subval mt-1">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="kpi-card-title">報廢率（平均）</div>
+        <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
+        <div id="kpiScrapRateSub" class="subval mt-1">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="kpi-card-title">超用額（平均/日）</div>
+        <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
+        <div id="kpiOverAmtSub" class="subval mt-1">—</div>
+      </div>
+      <div class="card p-4">
+        <div class="kpi-card-title">超用率（平均）</div>
+        <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
+        <div id="kpiOverRateSub" class="subval mt-1">—</div>
+      </div>
+    </div>
+
+    <!-- Top cards -->
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="kpi-card-title">廢棄前10名（平均/日）</div>
+            <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
+            <div class="subval mt-1">構成比（平均）：<span id="topScrapShare" class="mono">—</span></div>
+          </div>
+          <div class="chip">2) 卡片框</div>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="kpi-card-title">超用前10名（平均/日）</div>
+            <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
+            <div class="subval mt-1">構成比（平均）：<span id="topOverShare" class="mono">—</span></div>
+          </div>
+          <div class="chip">2) 卡片框</div>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="kpi-card-title">共用類廢棄（平均/日）</div>
+            <div id="sharedAmt" class="kpi-card-value mono mt-1">—</div>
+            <div class="subval mt-1 flex items-center gap-2">
+              構成比（平均，KPI 15%）：<span id="sharedShare" class="mono">—</span>
+              <span id="sharedBadge" class="hidden"></span>
+            </div>
+          </div>
+          <div class="chip">2) 卡片框</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="card p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">4) KPI 趨勢圖（最多選 2 個指標）</div>
+            <div class="text-xs muted mt-1">同時支援金額與比率（雙座標）。</div>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="sales">營業額</label>
+            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapAmt">報廢額</label>
+            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapRate">報廢率</label>
+            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseAmt">超用額</label>
+            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseRate">超用率</label>
+          </div>
+        </div>
+        <div class="mt-3">
+          <canvas id="kpiChart" height="140"></canvas>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">5) 廢棄／超用 趨勢圖（雙指標線）</div>
+            <div class="text-xs muted mt-1">金額總計（平均/日）＋構成比（平均）。</div>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
+            <button class="seg-btn" data-right="overTop10">超用前10名</button>
+            <button class="seg-btn" data-right="shared">共用類廢棄</button>
+          </div>
+        </div>
+        <div class="mt-3">
+          <canvas id="rightChart" height="140"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Semi-product expansion -->
+    <div class="mt-4 card p-4">
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">6) 半成品展開</div>
+            <div class="text-xs muted mt-1">排序、搜尋後可點擊列查看趨勢圖與日別明細。</div>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <div class="text-xs muted">排序依據</div>
+            <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
+              <option value="diffAmt">差異金額（高→低）</option>
+              <option value="scrapAmt">報廢金額（高→低）</option>
+              <option value="overuseAmt">超用金額（高→低）</option>
+              <option value="refillQty">補單量（高→低）</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+          <div class="lg:col-span-5">
+            <label class="text-xs muted">品名搜尋（輸入關鍵字）</label>
+            <input id="productSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：握便當 / 雞胸 / 義大利麵…" />
+            <div id="productSuggest" class="mt-1 hidden"></div>
+          </div>
+          <div class="lg:col-span-5">
+            <label class="text-xs muted">半成品名搜尋（輸入關鍵字）</label>
+            <input id="semiSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：飯 / 麵 / 醬 / 配菜…" />
+            <div id="semiSuggest" class="mt-1 hidden"></div>
+          </div>
+          <div class="lg:col-span-2 flex gap-2">
+            <button id="clearSearchBtn" class="seg-btn w-full">清除</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs muted flex flex-wrap items-center justify-between gap-2">
+            <div>顯示：<span id="groupCount">0</span> 筆（最多 200 筆）</div>
+            <div class="flex items-center gap-2">
+              <span class="chip">點擊列可查看趨勢＆明細</span>
+            </div>
+          </div>
+          <div class="overflow-auto max-h-[420px]">
+            <table>
+              <thead>
+                <tr>
+                  <th>商品名</th>
+                  <th>半成品名</th>
+                  <th class="text-right">補單</th>
+                  <th class="text-right">實際生產率</th>
+                  <th class="text-right">差異金額</th>
+                  <th class="text-right">報廢金額</th>
+                  <th class="text-right">超用金額</th>
+                </tr>
+              </thead>
+              <tbody id="groupTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Selected item -->
+        <div id="itemPanel" class="hidden mt-2">
+          <div class="flex flex-col gap-2">
+            <div class="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold">商品趨勢圖與日別明細</div>
+                <div id="itemTitle" class="text-xs muted mt-1">—</div>
+              </div>
+              <div class="flex flex-wrap gap-2 items-center">
+                <label class="chip"><input class="mr-1" type="checkbox" data-item="prodRate">實際生產率</label>
+                <label class="chip"><input class="mr-1" type="checkbox" data-item="diffAmt">差異金額</label>
+                <label class="chip"><input class="mr-1" type="checkbox" data-item="scrapAmt">報廢金額</label>
+                <label class="chip"><input class="mr-1" type="checkbox" data-item="overuseAmt">超用金額</label>
+                <label class="chip"><input class="mr-1" type="checkbox" data-item="refillQty">補單量</label>
+              </div>
+            </div>
+
+            <div class="card p-3">
+              <canvas id="itemChart" height="160"></canvas>
+            </div>
+
+            <div class="table-wrap">
+              <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs muted flex flex-wrap items-center justify-between gap-2">
+                <div>日別明細（依日期排序）</div>
+                <div class="flex gap-2">
+                  <button id="exportCsvBtn" class="seg-btn">下載 CSV</button>
+                </div>
+              </div>
+              <div class="overflow-auto max-h-[420px]">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>日期</th>
+                      <th>商品名</th>
+                      <th>半成品名</th>
+                      <th class="text-right">訂單需求</th>
+                      <th class="text-right">實際產出</th>
+                      <th class="text-right">補單</th>
+                      <th class="text-right">單價</th>
+                      <th class="text-right">實際生產率</th>
+                      <th class="text-right">差異量</th>
+                      <th class="text-right">差異金額</th>
+                      <th class="text-right">報廢量</th>
+                      <th class="text-right">報廢金額</th>
+                      <th class="text-right">超用量</th>
+                      <th class="text-right">超用金額</th>
+                    </tr>
+                  </thead>
+                  <tbody id="detailTbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="mt-6 text-xs muted">
+      備註：本頁使用「日別報廢率總表」計算 KPI／前10名／共用類廢棄；「各日合計」頁籤用於半成品明細展開。
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+<script>
+/* =========================
+   晉欣鮮食廠｜半成品儀表板
+   - GitHub Pages 版：同網域讀取 ./data/*.xlsx
+   - 需要 XLSX (SheetJS) 與 Chart.js
+========================= */
+
+const state = {
+  loaded: false,
+  summary: [],
+  details: [],
+  dateMin: null,
+  dateMax: null,
+  years: [],
+  months: [],
+  weeks: [],
+  mode: 'year',             // year|month|week|day|range
+  gran: 'auto',             // auto|day|week|month
+  selection: {
+    year: null,
+    month: null,
+    weekStart: null,
+    day: null,
+    start: null,
+    end: null
+  },
+  kpiSelected: ['sales','scrapAmt'],
+  rightMode: 'scrapTop10',
+  groupRows: [],
+  filteredGroups: [],
+  selectedKey: null,
+  selectedDaily: [],
+  charts: {
+    kpi: null,
+    right: null,
+    item: null
+  },
+  _groupRangeKey: null
+};
+const $ = (id) => document.getElementById(id);
+const toast = (msg) => {
+  const el = $('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.display = 'none', 3000);
+};
+
+const fmtInt = (n) => (Number.isFinite(n) ? n.toLocaleString('zh-TW') : '—');
+const fmtMoney = (n) => {
+  if (!Number.isFinite(n)) return '—';
+  const v = Math.round(n);
+  return 'NT$ ' + v.toLocaleString('zh-TW');
+};
+const fmtPct = (n) => {
+  if (!Number.isFinite(n)) return '—';
+  return (n * 100).toFixed(2) + '%';
+};
+const toISO = (d) => {
+  const z = new Date(d);
+  const yyyy = z.getFullYear();
+  const mm = String(z.getMonth()+1).padStart(2,'0');
+  const dd = String(z.getDate()).padStart(2,'0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+const parseMaybeDate = (v) => {
+  if (!v) return null;
+  if (v instanceof Date && !isNaN(v)) return v;
+  if (typeof v === 'number' && isFinite(v)) {
+    // Excel serial date
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + v * 86400 * 1000);
+    // convert to local date (keep date part)
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  if (typeof v === 'string') {
+    // accept yyyy/mm/dd or yyyy-mm-dd
+    const s = v.trim().replace(/\./g,'/').replace(/-/g,'/');
+    const m = s.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+    const d = new Date(v);
+    if (!isNaN(d)) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  return null;
+};
+
+function ensureLibGlobal(globalName, urls, timeoutMs=20000) {
+  return new Promise((resolve, reject) => {
+    if (window[globalName]) return resolve(true);
+
+    let idx = 0;
+    let started = Date.now();
+
+    const tryLoad = () => {
+      if (window[globalName]) return resolve(true);
+      if (Date.now() - started > timeoutMs) return reject(new Error(globalName + ' 載入逾時'));
+
+      if (idx >= urls.length) {
+        // Wait a bit for lazy loader stubs
+        setTimeout(() => tryLoad(), 150);
+        return;
+      }
+
+      const url = urls[idx++];
+      const s = document.createElement('script');
+      s.src = url;
+      s.async = true;
+      s.onload = () => {
+        // Poll a bit because the stub may lazy-load the real file
+        const pollStart = Date.now();
+        const poll = () => {
+          if (window[globalName]) return resolve(true);
+          if (Date.now() - pollStart > 5000) return tryLoad();
+          setTimeout(poll, 80);
+        };
+        poll();
+      };
+      s.onerror = () => tryLoad();
+      document.head.appendChild(s);
+    };
+
+    tryLoad();
+  });
+}
+
+async function loadManifest() {
+  try {
+    const r = await fetch('./data/manifest.json', {cache:'no-store'});
+    if (!r.ok) throw new Error('manifest 讀取失敗');
+    const j = await r.json();
+    if (j && Array.isArray(j.files)) return j.files;
+  } catch (e) {
+    // fallback list (同名可自行新增)
+    return [
+      "2025-0701-0731晉欣半成品報廢管理表.xlsx", "2025-0801-08031晉欣半成品報廢管理表.xlsx", "2025-0901-0931晉欣半成品報廢管理表.xlsx", "2025-1001-1031晉欣半成品報廢管理表.xlsx", "2025-1101-1131晉欣半成品報廢管理表.xlsx", "2025-1201-1231晉欣半成品報廢管理表.xlsx", "2026-0101-0112晉欣半成品報廢管理表.xlsx"
+    ].map(s => s);
+  }
+  return [];
+}
+
+function normalizeHeader(x) {
+  return (x ?? '').toString().replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')');
+}
+
+function findSheetName(wb, keyword) {
+  const k = keyword.replace(/\s+/g,'');
+  return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
+}
+
+function parseSummaryFromWB(wb) {
+  const sname = wb.SheetNames.find(n => n.replace(/\s+/g,'').includes('日別報廢率總表')) || null;
+  if (!sname) return [];
+  const ws = wb.Sheets[sname];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+  if (!rows || !rows.length) return [];
+
+  // header row contains "日期"
+  let hRow = -1;
+  for (let i=0;i<rows.length;i++) {
+    if (normalizeHeader(rows[i][0]).includes('日期')) { hRow = i; break; }
+  }
+  if (hRow < 0) return [];
+
+  const header = rows[hRow].map(normalizeHeader);
+  const col = (name) => header.findIndex(h => h===name);
+  const idxDate = 0;
+
+  const idxSales = header.findIndex(h => h.includes('營業額'));
+  const idxScrapAmt = header.findIndex(h => h.includes('報廢金額'));
+  const idxScrapRate = header.findIndex(h => h.includes('報廢率'));
+  const idxOverAmt = header.findIndex(h => h.includes('超用金額'));
+  const idxOverRate = header.findIndex(h => h.includes('超用率'));
+  const idxTopScrapAmt = header.findIndex(h => h.includes('廢棄前10名金額總計'));
+  const idxTopScrapShare = header.findIndex(h => h.includes('廢棄前10名構成比'));
+  const idxTopOverAmt = header.findIndex(h => h.includes('超用前10名金額總計'));
+  const idxTopOverShare = header.findIndex(h => h.includes('超用前10名構成比'));
+  const idxSharedAmt = header.findIndex(h => h.includes('共用類廢棄金額總計'));
+  const idxSharedShare = header.findIndex(h => h.includes('共用類廢棄構成比'));
+
+  const out = [];
+  for (let r=hRow+1;r<rows.length;r++) {
+    const row = rows[r];
+    const d = parseMaybeDate(row[idxDate]);
+    if (!d) continue;
+    out.push({
+      date: toISO(d),
+      sales: Number(row[idxSales] ?? 0) || 0,
+      scrapAmt: Number(row[idxScrapAmt] ?? 0) || 0,
+      scrapRate: Number(row[idxScrapRate] ?? 0) || 0,
+      overuseAmt: Number(row[idxOverAmt] ?? 0) || 0,
+      overuseRate: Number(row[idxOverRate] ?? 0) || 0,
+      topScrapAmt: Number(row[idxTopScrapAmt] ?? 0) || 0,
+      topScrapShare: Number(row[idxTopScrapShare] ?? 0) || 0,
+      topOverAmt: Number(row[idxTopOverAmt] ?? 0) || 0,
+      topOverShare: Number(row[idxTopOverShare] ?? 0) || 0,
+      sharedAmt: Number(row[idxSharedAmt] ?? 0) || 0,
+      sharedShare: Number(row[idxSharedShare] ?? 0) || 0,
+    });
+  }
+  return out;
+}
+
+function parseDetailsFromWB(wb) {
+  const out = [];
+  const sheets = wb.SheetNames.filter(n => n.includes('合計') && !n.replace(/\s+/g,'').includes('日別報廢率總表'));
+  for (const sname of sheets) {
+    const ws = wb.Sheets[sname];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    if (!rows || rows.length < 4) continue;
+
+    // find header row (contains 商品名稱 & 半成品名稱)
+    let h = -1;
+    for (let i=0;i<Math.min(rows.length, 20);i++) {
+      const row = rows[i].map(normalizeHeader);
+      if (row.some(x => x.includes('商品名稱')) && row.some(x => x.includes('半成品名稱'))) {
+        h = i; break;
+      }
+    }
+    if (h < 0) continue;
+
+    const header = rows[h].map(normalizeHeader);
+    const idx = (kw) => header.findIndex(h => h.includes(kw));
+
+    const iDate = idx('日期') >= 0 ? idx('日期') : 0; // some files label as 序號 but values are dates
+    const iProd = idx('商品名稱');
+    const iSemi = idx('半成品名稱');
+    const iPrice = idx('單價');
+    const iOrder = idx('訂單量');
+    const iOut = idx('出料量');
+    const iRefill = idx('補單量');
+    const iDiffQty = idx('差異量') >= 0 ? idx('差異量') : idx('差異數量');
+    const iDiffAmt = idx('差異量(金額)') >= 0 ? idx('差異量(金額)') : idx('差異量（金額）');
+    const iScrapQty = idx('報廢量');
+    const iScrapAmt = idx('報廢量(金額)') >= 0 ? idx('報廢量(金額)') : idx('報廢量（金額）');
+    const iOverAmt = idx('超用金額') >= 0 ? idx('超用金額') : idx('超用量(金額)');
+
+    if (iProd < 0 || iSemi < 0) continue;
+
+    for (let r=h+1; r<rows.length; r++) {
+      const row = rows[r];
+      const prod = (row[iProd] ?? '').toString().trim();
+      const semi = (row[iSemi] ?? '').toString().trim();
+      if (!prod && !semi) continue;
+
+      const d = parseMaybeDate(row[iDate]);
+      if (!d) continue;
+
+      const price = Number(row[iPrice] ?? 0) || 0;
+      const order = Number(row[iOrder] ?? 0) || 0;
+      const outQty = Number(row[iOut] ?? 0) || 0;
+      const refill = Number(row[iRefill] ?? 0) || 0;
+      const diffQty = Number(row[iDiffQty] ?? 0) || 0;
+      const diffAmt = Number(row[iDiffAmt] ?? 0) || 0;
+      const scrapQty = Number(row[iScrapQty] ?? 0) || 0;
+      const scrapAmt = Number(row[iScrapAmt] ?? 0) || 0;
+      const overuseAmt = Number(row[iOverAmt] ?? 0) || 0;
+      const overuseQty = price > 0 ? (overuseAmt / price) : 0;
+
+      out.push({
+        date: toISO(d),
+        product: prod,
+        semi: semi,
+        price,
+        order,
+        output: outQty,
+        refill,
+        prodRate: order > 0 ? (outQty / order) : null,
+        diffQty,
+        diffAmt,
+        scrapQty,
+        scrapAmt,
+        overuseQty,
+        overuseAmt
+      });
+    }
+  }
+  return out;
+}
+
+async function loadAllData() {
+  $('dataStatus').innerHTML = '<span class="loader"></span> 載入中...';
+  $('dataStatus').classList.remove('chip');
+  $('dataStatus').classList.add('chip');
+
+  // Ensure libs
+  await ensureLibGlobal('XLSX', [
+    './xlsx.full.min.js',
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
+  ]);
+  await ensureLibGlobal('Chart', [
+    './chart.umd.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
+  ]);
+
+  const files = await loadManifest();
+  if (!files.length) throw new Error('manifest 無任何檔案');
+
+  let sum = [];
+  let det = [];
+  for (const f of files) {
+    const url = './data/' + encodeURIComponent(f);
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) throw new Error('讀取失敗：' + f);
+    const ab = await r.arrayBuffer();
+    const wb = XLSX.read(ab, {type:'array', cellDates:true});
+    sum = sum.concat(parseSummaryFromWB(wb));
+    det = det.concat(parseDetailsFromWB(wb));
+  }
+
+  // dedupe summary by date (keep last)
+  const m = new Map();
+  for (const r of sum) m.set(r.date, r);
+  state.summary = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
+  state.details = det.sort((a,b)=>a.date.localeCompare(b.date));
+
+  if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
+  state.dateMin = state.summary[0].date;
+  state.dateMax = state.summary[state.summary.length-1].date;
+
+  $('dataStatus').textContent = '已載入 ' + files.length + ' 份檔案';
+  $('fileLabel').textContent = '檔案：' + files.length + ' 份（manifest.json）';
+  $('detailLabel').textContent = '明細：' + state.details.length.toLocaleString('zh-TW') + ' 筆';
+}
+
+function buildSelectors() {
+  const years = Array.from(new Set(state.summary.map(r => r.date.slice(0,4)))).sort();
+  state.years = years;
+
+  $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+
+  // month options depend on year
+  const monthsAll = Array.from(new Set(state.summary.map(r => r.date.slice(0,7)))).sort();
+  state.months = monthsAll;
+
+  $('monthSel').innerHTML = Array.from({length:12}, (_,i)=>i+1).map(m => {
+    const mm = String(m).padStart(2,'0');
+    return `<option value="${mm}">${m} 月</option>`;
+  }).join('');
+
+  // week list (週二～週一)
+  const weekStart = (dateStr) => {
+    const d = parseMaybeDate(dateStr);
+    if (!d) return null;
+    const day = d.getDay(); // 0 Sun ... 6 Sat
+    const diff = (day - 2 + 7) % 7; // Tuesday = 2
+    const s = new Date(d);
+    s.setDate(s.getDate() - diff);
+    return s;
+  };
+  const wkMap = new Map();
+  for (const r of state.summary) {
+    const s = weekStart(r.date);
+    if (!s) continue;
+    const key = toISO(s);
+    if (!wkMap.has(key)) {
+      const e = new Date(s);
+      e.setDate(e.getDate()+6);
+      wkMap.set(key, {start:key, end:toISO(e)});
+    }
+  }
+  state.weeks = Array.from(wkMap.values()).sort((a,b)=>a.start.localeCompare(b.start));
+  $('weekSel').innerHTML = state.weeks.map(w => `<option value="${w.start}">${w.start} ～ ${w.end}</option>`).join('');
+
+  // default: latest year
+  const latestYear = state.dateMax.slice(0,4);
+  $('yearSel').value = latestYear;
+  state.selection.year = latestYear;
+
+  // default month: latest month
+  $('monthSel').value = state.dateMax.slice(5,7);
+  state.selection.month = state.dateMax.slice(5,7);
+
+  // default week: latest date's week
+  const latestWeekStart = weekStart(state.dateMax);
+  if (latestWeekStart) {
+    $('weekSel').value = toISO(latestWeekStart);
+    state.selection.weekStart = toISO(latestWeekStart);
+  }
+
+  $('daySel').value = state.dateMax;
+  state.selection.day = state.dateMax;
+
+  $('rangeStart').value = state.dateMin;
+  $('rangeEnd').value = state.dateMax;
+  state.selection.start = state.dateMin;
+  state.selection.end = state.dateMax;
+
+  // default KPI selection
+  for (const cb of document.querySelectorAll('input[type=checkbox][data-kpi]')) {
+    cb.checked = state.kpiSelected.includes(cb.dataset.kpi);
+  }
+  for (const cb of document.querySelectorAll('input[type=checkbox][data-item]')) {
+    cb.checked = ['prodRate','diffAmt'].includes(cb.dataset.item);
+  }
+}
+
+function getDateRange() {
+  const mode = state.mode;
+  let start = state.dateMin;
+  let end = state.dateMax;
+
+  if (mode === 'year') {
+    const y = $('yearSel').value;
+    start = `${y}-01-01`;
+    end = `${y}-12-31`;
+  } else if (mode === 'month') {
+    const y = $('yearSel').value;
+    const m = $('monthSel').value;
+    start = `${y}-${m}-01`;
+    const d = new Date(Number(y), Number(m), 0);
+    end = toISO(d);
+  } else if (mode === 'week') {
+    const ws = $('weekSel').value;
+    const w = state.weeks.find(x => x.start === ws);
+    if (w) { start = w.start; end = w.end; }
+  } else if (mode === 'day') {
+    const d = $('daySel').value;
+    start = d;
+    end = d;
+  } else if (mode === 'range') {
+    start = $('rangeStart').value || state.dateMin;
+    end = $('rangeEnd').value || state.dateMax;
+  }
+
+  // clamp to dataset
+  if (start < state.dateMin) start = state.dateMin;
+  if (end > state.dateMax) end = state.dateMax;
+  if (start > end) [start,end] = [end,start];
+
+  state.selection.start = start;
+  state.selection.end = end;
+
+  return {start, end};
+}
+
+function filterByRange(arr, start, end) {
+  return arr.filter(r => r.date >= start && r.date <= end);
+}
+
+function aggGranularity(start, end) {
+  const forced = $('granSel').value;
+  if (forced !== 'auto') return forced;
+
+  if (state.mode === 'year') return 'month';
+  const sd = parseMaybeDate(start);
+  const ed = parseMaybeDate(end);
+  const days = Math.round((ed - sd) / 86400000) + 1;
+  if (days > 90) return 'week';
+  return 'day';
+}
+
+function groupKeyByGran(dateStr, gran) {
+  if (gran === 'day') return dateStr;
+  if (gran === 'month') return dateStr.slice(0,7);
+
+  // week (週二～週一)
+  const d = parseMaybeDate(dateStr);
+  const day = d.getDay();
+  const diff = (day - 2 + 7) % 7;
+  const s = new Date(d); s.setDate(s.getDate() - diff);
+  const e = new Date(s); e.setDate(e.getDate() + 6);
+  return toISO(s) + '～' + toISO(e);
+}
+
+function aggregateSeries(rows, metric, gran) {
+  const buckets = new Map();
+  for (const r of rows) {
+    const k = groupKeyByGran(r.date, gran);
+    if (!buckets.has(k)) buckets.set(k, {k, n:0, sum:0});
+    const b = buckets.get(k);
+    b.n += 1;
+    b.sum += (Number(r[metric]) || 0);
+  }
+  const keys = Array.from(buckets.keys()).sort((a,b)=>a.localeCompare(b));
+  const values = keys.map(k => {
+    const b = buckets.get(k);
+    if (metric.endsWith('Rate') || metric.endsWith('Share')) {
+      return b.sum / b.n; // average of rates
+    }
+    return b.sum / b.n;   // average per day (because rows are daily)
+  });
+  return {labels: keys, values};
+}
+
+function updateKPICards(srows) {
+  const n = srows.length || 1;
+  const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
+  const avgAmt = (k) => sum(k) / n;
+  const avgRate = (k) => sum(k) / n;
+
+  const sales = avgAmt('sales');
+  const scrapAmt = avgAmt('scrapAmt');
+  const scrapRate = avgRate('scrapRate');
+  const overAmt = avgAmt('overuseAmt');
+  const overRate = avgRate('overuseRate');
+
+  $('kpiSales').textContent = fmtMoney(sales);
+  $('kpiSalesSub').textContent = `合計：${fmtMoney(sum('sales'))}｜天數：${n}`;
+
+  $('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
+  $('kpiScrapAmtSub').textContent = `合計：${fmtMoney(sum('scrapAmt'))}｜天數：${n}`;
+
+  $('kpiScrapRate').textContent = fmtPct(scrapRate);
+  $('kpiScrapRateSub').textContent = `參考：日均值`;
+
+  $('kpiOverAmt').textContent = fmtMoney(overAmt);
+  $('kpiOverAmtSub').textContent = `合計：${fmtMoney(sum('overuseAmt'))}｜天數：${n}`;
+
+  $('kpiOverRate').textContent = fmtPct(overRate);
+  $('kpiOverRateSub').textContent = `參考：日均值`;
+
+  // top cards
+  const topScrapAmt = avgAmt('topScrapAmt');
+  const topScrapShare = avgRate('topScrapShare');
+  $('topScrapAmt').textContent = fmtMoney(topScrapAmt);
+  $('topScrapShare').textContent = fmtPct(topScrapShare);
+
+  const topOverAmt = avgAmt('topOverAmt');
+  const topOverShare = avgRate('topOverShare');
+  $('topOverAmt').textContent = fmtMoney(topOverAmt);
+  $('topOverShare').textContent = fmtPct(topOverShare);
+
+  const sharedAmt = avgAmt('sharedAmt');
+  const sharedShare = avgRate('sharedShare');
+  $('sharedAmt').textContent = fmtMoney(sharedAmt);
+  $('sharedShare').textContent = fmtPct(sharedShare);
+
+  const badge = $('sharedBadge');
+  badge.className = '';
+  if (Number.isFinite(sharedShare)) {
+    if (sharedShare <= 0.15) {
+      badge.className = 'badge-ok';
+      badge.textContent = '達標';
+    } else {
+      badge.className = 'badge-danger';
+      badge.textContent = '超過 KPI';
+    }
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function destroyChart(key) {
+  const c = state.charts[key];
+  if (c) { c.destroy(); state.charts[key] = null; }
+}
+
+function renderKPIChart(srows, start, end) {
+  destroyChart('kpi');
+  const gran = aggGranularity(start, end);
+
+  const selected = state.kpiSelected.slice(0,2);
+  if (!selected.length) return;
+
+  const metricMeta = {
+    sales: {label:'營業額', axis:'y', kind:'amt'},
+    scrapAmt: {label:'報廢額', axis:'y', kind:'amt'},
+    overuseAmt: {label:'超用額', axis:'y', kind:'amt'},
+    scrapRate: {label:'報廢率', axis:'y1', kind:'rate'},
+    overuseRate: {label:'超用率', axis:'y1', kind:'rate'},
+  };
+
+  const labels = (() => {
+    // use labels from first series
+    const s = aggregateSeries(srows, selected[0], gran);
+    return s.labels;
+  })();
+
+  const datasets = selected.map((m, idx) => {
+    const s = aggregateSeries(srows, m, gran);
+    const meta = metricMeta[m];
+    return {
+      label: meta.label,
+      data: s.values,
+      yAxisID: meta.axis,
+      tension: 0.25,
+      pointRadius: labels.length > 45 ? 0 : 2
+    };
+  });
+
+  const ctx = $('kpiChart').getContext('2d');
+  state.charts.kpi = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const id = ctx.dataset.yAxisID;
+              const v = ctx.parsed.y;
+              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: (v) => fmtMoney(v).replace('NT$ ','')
+          }
+        },
+        y1: {
+          beginAtZero: true,
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: {
+            callback: (v) => (v*100).toFixed(1) + '%'
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderRightChart(srows, start, end) {
+  destroyChart('right');
+  const gran = aggGranularity(start, end);
+
+  let amtKey, shareKey, title;
+  if (state.rightMode === 'scrapTop10') {
+    amtKey = 'topScrapAmt'; shareKey = 'topScrapShare'; title = '廢棄前10名';
+  } else if (state.rightMode === 'overTop10') {
+    amtKey = 'topOverAmt'; shareKey = 'topOverShare'; title = '超用前10名';
+  } else {
+    amtKey = 'sharedAmt'; shareKey = 'sharedShare'; title = '共用類廢棄';
+  }
+
+  const sAmt = aggregateSeries(srows, amtKey, gran);
+  const sShare = aggregateSeries(srows, shareKey, gran);
+
+  const labels = sAmt.labels;
+  const ctx = $('rightChart').getContext('2d');
+  state.charts.right = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: title + '｜金額總計（平均/日）',
+          data: sAmt.values,
+          yAxisID: 'y',
+          tension: 0.25,
+          pointRadius: labels.length > 45 ? 0 : 2
+        },
+        {
+          label: title + '｜構成比（平均）',
+          data: sShare.values,
+          yAxisID: 'y1',
+          tension: 0.25,
+          pointRadius: labels.length > 45 ? 0 : 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const id = ctx.dataset.yAxisID;
+              const v = ctx.parsed.y;
+              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: (v) => fmtMoney(v).replace('NT$ ','')
+          }
+        },
+        y1: {
+          beginAtZero: true,
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: {
+            callback: (v) => (v*100).toFixed(1) + '%'
+          }
+        }
+      }
+    }
+  });
+}
+
+function aggregateGroups(drows) {
+  const map = new Map();
+  for (const r of drows) {
+    const key = r.product + '||' + r.semi;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        product: r.product,
+        semi: r.semi,
+        order: 0,
+        output: 0,
+        refillQty: 0,
+        diffAmt: 0,
+        scrapAmt: 0,
+        overuseAmt: 0
+      });
+    }
+    const o = map.get(key);
+    o.order += Number(r.order) || 0;
+    o.output += Number(r.output) || 0;
+    o.refillQty += Number(r.refill) || 0;
+    o.diffAmt += Math.abs(Number(r.diffAmt) || 0);
+    o.scrapAmt += Number(r.scrapAmt) || 0;
+    o.overuseAmt += Number(r.overuseAmt) || 0;
+  }
+  const out = Array.from(map.values());
+  for (const o of out) {
+    o.prodRate = o.order > 0 ? (o.output / o.order) : null;
+  }
+  return out;
+}
+
+function applyGroupFilterAndRender(drows) {
+  const rangeKey = state.selection.start + '|' + state.selection.end;
+  if (state._groupRangeKey !== rangeKey) {
+    state.groupRows = aggregateGroups(drows);
+    state._groupRangeKey = rangeKey;
+  }
+
+  const kwProd = $('productSearch').value.trim().toLowerCase();
+  const kwSemi = $('semiSearch').value.trim().toLowerCase();
+
+  let filtered = state.groupRows;
+  if (kwProd) {
+    filtered = filtered.filter(r => r.product.toLowerCase().includes(kwProd));
+  }
+  if (kwSemi) {
+    filtered = filtered.filter(r => r.semi.toLowerCase().includes(kwSemi));
+  }
+
+  const sort = $('sortSel').value;
+  const by = (k) => (a,b) => (Number(b[k])||0) - (Number(a[k])||0);
+  if (sort === 'diffAmt') filtered.sort(by('diffAmt'));
+  if (sort === 'scrapAmt') filtered.sort(by('scrapAmt'));
+  if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
+  if (sort === 'refillQty') filtered.sort(by('refillQty'));
+
+  state.filteredGroups = filtered.slice(0,200);
+  $('groupCount').textContent = state.filteredGroups.length.toLocaleString('zh-TW');
+
+  const tbody = $('groupTbody');
+  tbody.innerHTML = '';
+  for (const r of state.filteredGroups) {
+    const tr = document.createElement('tr');
+    tr.className = 'cursor-pointer';
+    tr.innerHTML = `
+      <td>${r.product}</td>
+      <td class="muted">${r.semi}</td>
+      <td class="text-right mono">${fmtInt(r.refillQty)}</td>
+      <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
+      <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
+      <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
+      <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+    `;
+    tr.addEventListener('click', () => {
+      state.selectedKey = r.key;
+      renderSelectedItem();
+    });
+    tbody.appendChild(tr);
+  }
+
+  // if selected item no longer in list, hide
+  if (state.selectedKey && !state.groupRows.some(x => x.key === state.selectedKey)) {
+    state.selectedKey = null;
+    $('itemPanel').classList.add('hidden');
+  }
+}
+
+function buildSuggestion(list, keyword, onPick) {
+  const kw = keyword.trim().toLowerCase();
+  if (!kw) return [];
+  const hits = list.filter(r => (r.product + ' ' + r.semi).toLowerCase().includes(kw)).slice(0,8);
+  return hits.map(r => ({
+    label: `${r.product}｜${r.semi}`,
+    key: r.key
+  }));
+}
+
+function renderSuggest(containerId, items, onClick) {
+  const wrap = $(containerId);
+  if (!items.length) {
+    wrap.classList.add('hidden');
+    wrap.innerHTML = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  wrap.className = 'mt-1 card p-2';
+  wrap.innerHTML = items.map((it, idx) => `
+    <div class="px-2 py-2 rounded-lg hover:bg-slate-50 cursor-pointer text-sm" data-idx="${idx}">
+      <span class="mono text-xs muted mr-2">#${idx+1}</span>${it.label}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-idx]').forEach(el => {
+    el.addEventListener('click', () => onClick(items[Number(el.dataset.idx)]));
+  });
+}
+
+function getSelectedRangeRows() {
+  const {start, end} = getDateRange();
+  const srows = filterByRange(state.summary, start, end);
+  const drows = filterByRange(state.details, start, end);
+  return {start, end, srows, drows};
+}
+
+function renderAll() {
+  const {start, end, srows, drows} = getSelectedRangeRows();
+
+  $('rangeLabel').textContent = `範圍：${start} ～ ${end}（${srows.length} 天）`;
+  updateKPICards(srows);
+
+  renderKPIChart(srows, start, end);
+  renderRightChart(srows, start, end);
+
+  applyGroupFilterAndRender(drows);
+}
+
+function renderSelectedItem() {
+  if (!state.selectedKey) {
+    $('itemPanel').classList.add('hidden');
+    return;
+  }
+  const {start, end} = getDateRange();
+  const drows = filterByRange(state.details, start, end).filter(r => (r.product + '||' + r.semi) === state.selectedKey);
+  if (!drows.length) {
+    $('itemPanel').classList.add('hidden');
+    return;
+  }
+
+  // aggregate by date
+  const m = new Map();
+  for (const r of drows) {
+    if (!m.has(r.date)) m.set(r.date, {
+      date: r.date,
+      product: r.product,
+      semi: r.semi,
+      order: 0, output: 0, refill: 0,
+      priceSum: 0, priceN: 0,
+      diffQty: 0, diffAmt: 0,
+      scrapQty: 0, scrapAmt: 0,
+      overuseAmt: 0
+    });
+    const o = m.get(r.date);
+    o.order += Number(r.order)||0;
+    o.output += Number(r.output)||0;
+    o.refill += Number(r.refill)||0;
+    if (Number.isFinite(r.price) && r.price>0) { o.priceSum += r.price; o.priceN += 1; }
+    o.diffQty += Number(r.diffQty)||0;
+    o.diffAmt += Number(r.diffAmt)||0;
+    o.scrapQty += Number(r.scrapQty)||0;
+    o.scrapAmt += Number(r.scrapAmt)||0;
+    o.overuseAmt += Number(r.overuseAmt)||0;
+  }
+  const daily = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
+  for (const o of daily) {
+    o.price = o.priceN ? (o.priceSum / o.priceN) : null;
+    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.overuseQty = (o.price && o.price>0) ? (o.overuseAmt / o.price) : null;
+  }
+  state.selectedDaily = daily;
+
+  const title = daily[0].product + '｜' + daily[0].semi;
+  $('itemTitle').textContent = `${title}（${start} ～ ${end}）`;
+  $('itemPanel').classList.remove('hidden');
+
+  renderItemChart(daily);
+  renderDetailTable(daily);
+}
+
+function renderItemChart(daily) {
+  destroyChart('item');
+  const selected = Array.from(document.querySelectorAll('input[type=checkbox][data-item]'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.dataset.item);
+
+  const meta = {
+    prodRate: {label:'實際生產率', axis:'y1', fmt:(v)=>fmtPct(v)},
+    diffAmt: {label:'差異金額', axis:'y', fmt:(v)=>fmtMoney(v)},
+    scrapAmt: {label:'報廢金額', axis:'y', fmt:(v)=>fmtMoney(v)},
+    overuseAmt: {label:'超用金額', axis:'y', fmt:(v)=>fmtMoney(v)},
+    refillQty: {label:'補單量', axis:'y2', fmt:(v)=>fmtInt(v)},
+  };
+
+  const labels = daily.map(r => r.date);
+  const datasets = selected.map(m => {
+    const axis = meta[m].axis;
+    const data = daily.map(r => {
+      if (m === 'prodRate') return r.prodRate ?? null;
+      if (m === 'refillQty') return r.refill ?? 0;
+      return Number(r[m]) || 0;
+    });
+    return {
+      label: meta[m].label,
+      data,
+      yAxisID: axis,
+      tension: 0.25,
+      pointRadius: labels.length > 45 ? 0 : 2
+    };
+  });
+
+  const ctx = $('itemChart').getContext('2d');
+  state.charts.item = new Chart(ctx, {
+    type: 'line',
+    data: {labels, datasets},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { position:'top' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const m = selected[ctx.datasetIndex];
+              const v = ctx.parsed.y;
+              if (!m) return ' ';
+              if (m === 'prodRate') return ' ' + ctx.dataset.label + ': ' + fmtPct(v);
+              if (m === 'refillQty') return ' ' + ctx.dataset.label + ': ' + fmtInt(v);
+              return ' ' + ctx.dataset.label + ': ' + fmtMoney(v);
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { callback: (v)=>fmtMoney(v).replace('NT$ ','') }
+        },
+        y1: {
+          beginAtZero: true,
+          position: 'right',
+          grid: { drawOnChartArea:false },
+          ticks: { callback: (v)=>(v*100).toFixed(1)+'%' }
+        },
+        y2: {
+          beginAtZero: true,
+          position: 'right',
+          grid: { drawOnChartArea:false },
+          display: selected.includes('refillQty'),
+          ticks: { callback: (v)=>fmtInt(v) }
+        }
+      }
+    }
+  });
+}
+
+function renderDetailTable(daily) {
+  const tbody = $('detailTbody');
+  tbody.innerHTML = '';
+  for (const r of daily) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${r.date}</td>
+      <td>${r.product}</td>
+      <td class="muted">${r.semi}</td>
+      <td class="text-right mono">${fmtInt(r.order)}</td>
+      <td class="text-right mono">${fmtInt(r.output)}</td>
+      <td class="text-right mono">${fmtInt(r.refill)}</td>
+      <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
+      <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
+      <td class="text-right mono">${fmtInt(r.diffQty)}</td>
+      <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
+      <td class="text-right mono">${fmtInt(r.scrapQty)}</td>
+      <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
+      <td class="text-right mono">${r.overuseQty==null?'—':(r.overuseQty.toFixed(2))}</td>
+      <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function exportSelectedCsv() {
+  const rows = state.selectedDaily;
+  if (!rows || !rows.length) return;
+  const header = ['日期','商品名','半成品名','訂單需求','實際產出','補單','單價','實際生產率','差異量','差異金額','報廢量','報廢金額','超用量','超用金額'];
+  const lines = [header.join(',')];
+
+  const esc = (s) => {
+    const t = (s ?? '').toString();
+    if (/[",\n]/.test(t)) return '"' + t.replace(/"/g,'""') + '"';
+    return t;
+  };
+
+  for (const r of rows) {
+    lines.push([
+      r.date,
+      esc(r.product),
+      esc(r.semi),
+      r.order ?? '',
+      r.output ?? '',
+      r.refill ?? '',
+      r.price == null ? '' : r.price.toFixed(2),
+      r.prodRate == null ? '' : r.prodRate.toFixed(4),
+      r.diffQty ?? '',
+      r.diffAmt ?? '',
+      r.scrapQty ?? '',
+      r.scrapAmt ?? '',
+      r.overuseQty == null ? '' : r.overuseQty.toFixed(4),
+      r.overuseAmt ?? ''
+    ].join(','));
+  }
+  const blob = new Blob(['\ufeff' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  const name = (rows[0].product + '_' + rows[0].semi + '_' + state.selection.start + '_' + state.selection.end).replace(/\s+/g,'');
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function wireUI() {
+  // mode buttons
+  document.querySelectorAll('button.seg-btn[data-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button.seg-btn[data-mode]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.mode = btn.dataset.mode;
+      syncModeUI();
+    });
+  });
+
+  // right chart buttons
+  document.querySelectorAll('button.seg-btn[data-right]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button.seg-btn[data-right]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.rightMode = btn.dataset.right;
+      renderAll();
+    });
+  });
+
+  // apply
+  $('applyBtn').addEventListener('click', () => {
+    state.selection.year = $('yearSel').value;
+    state.selection.month = $('monthSel').value;
+    state.selection.weekStart = $('weekSel').value;
+    state.selection.day = $('daySel').value;
+    state.selection.start = $('rangeStart').value;
+    state.selection.end = $('rangeEnd').value;
+    renderAll();
+    renderSelectedItem();
+  });
+
+  $('todayBtn').addEventListener('click', () => {
+    // set to latest date (day mode)
+    state.mode = 'day';
+    document.querySelectorAll('button.seg-btn[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode==='day'));
+    syncModeUI();
+    $('daySel').value = state.dateMax;
+    $('applyBtn').click();
+  });
+
+  $('reloadBtn').addEventListener('click', async () => {
+    try {
+      await init(true);
+      toast('已重新載入資料');
+    } catch (e) {
+      toast('重新載入失敗：' + e.message);
+    }
+  });
+
+  // KPI selection max 2
+  document.querySelectorAll('input[type=checkbox][data-kpi]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const all = Array.from(document.querySelectorAll('input[type=checkbox][data-kpi]'));
+      const chosen = all.filter(x => x.checked).map(x => x.dataset.kpi);
+      if (chosen.length > 2) {
+        cb.checked = false;
+        toast('KPI 趨勢圖最多選 2 個指標');
+        return;
+      }
+      state.kpiSelected = chosen;
+      renderAll();
+    });
+  });
+
+  // item chart selection
+  document.querySelectorAll('input[type=checkbox][data-item]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (!state.selectedKey) return;
+      renderSelectedItem();
+    });
+  });
+
+  // group filters
+  $('sortSel').addEventListener('change', () => renderAll());
+  $('productSearch').addEventListener('input', () => {
+    const items = buildSuggestion(state.groupRows, $('productSearch').value, null);
+    renderSuggest('productSuggest', items, (it) => {
+      const row = state.groupRows.find(r => r.key === it.key);
+      if (!row) return;
+      $('productSearch').value = row.product;
+      $('semiSearch').value = row.semi;
+      state.selectedKey = row.key;
+      renderAll();
+      renderSelectedItem();
+    });
+    renderAll();
+  });
+  $('semiSearch').addEventListener('input', () => {
+    const items = buildSuggestion(state.groupRows, $('semiSearch').value, null);
+    renderSuggest('semiSuggest', items, (it) => {
+      const row = state.groupRows.find(r => r.key === it.key);
+      if (!row) return;
+      $('productSearch').value = row.product;
+      $('semiSearch').value = row.semi;
+      state.selectedKey = row.key;
+      renderAll();
+      renderSelectedItem();
+    });
+    renderAll();
+  });
+  $('clearSearchBtn').addEventListener('click', () => {
+    $('productSearch').value = '';
+    $('semiSearch').value = '';
+    $('productSuggest').classList.add('hidden');
+    $('semiSuggest').classList.add('hidden');
+    renderAll();
+  });
+
+  $('exportCsvBtn').addEventListener('click', exportSelectedCsv);
+}
+
+function syncModeUI() {
+  $('yearWrap').classList.toggle('hidden', false);
+  $('monthWrap').classList.toggle('hidden', state.mode !== 'month');
+  $('weekWrap').classList.toggle('hidden', state.mode !== 'week');
+  $('dayWrap').classList.toggle('hidden', state.mode !== 'day');
+  $('rangeWrap').classList.toggle('hidden', state.mode !== 'range');
+}
+
+async function init(force=false) {
+  try {
+    await loadAllData();
+    buildSelectors();
+    wireUI();
+    syncModeUI();
+    renderAll();
+    state.loaded = true;
+  } catch (e) {
+    console.error(e);
+    $('dataStatus').textContent = '載入失敗：' + e.message;
+    toast('載入失敗：' + e.message);
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
