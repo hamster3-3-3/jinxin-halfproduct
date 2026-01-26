@@ -154,7 +154,6 @@
     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">晉欣鮮食廠｜半成品儀表板</h1>
-        <div class="text-sm muted mt-1">資料來源：晉欣半成品報廢管理表（XLSX）｜本頁更新：2026-01-26 05:49</div>
       </div>
       <div class="flex flex-wrap gap-2 items-center">
         <span id="dataStatus" class="chip">尚未載入資料</span>
@@ -202,17 +201,6 @@
               <input id="rangeEnd" type="date" class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" />
             </div>
           </div>
-
-          <div class="md:col-span-2">
-            <label class="text-xs muted">顯示粒度</label>
-            <select id="granSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white">
-              <option value="auto">自動</option>
-              <option value="day">日</option>
-              <option value="week">週</option>
-              <option value="month">月</option>
-            </select>
-          </div>
-
           <div class="md:col-span-3 flex gap-2">
             <button id="applyBtn" class="seg-btn w-full">套用</button>
             <button id="todayBtn" class="seg-btn w-full">跳到最新日</button>
@@ -265,7 +253,7 @@
             <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1">構成比（平均）：<span id="topScrapShare" class="mono">—</span></div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
 
@@ -276,7 +264,7 @@
             <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1">構成比（平均）：<span id="topOverShare" class="mono">—</span></div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
 
@@ -290,7 +278,7 @@
               <span id="sharedBadge" class="hidden"></span>
             </div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
     </div>
@@ -301,7 +289,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-sm font-semibold">4) KPI 趨勢圖（最多選 2 個指標）</div>
-            <div class="text-xs muted mt-1">同時支援金額與比率（雙座標）。</div>
+            
           </div>
           <div class="flex flex-wrap gap-2 items-center">
             <label class="chip"><input class="mr-1" type="checkbox" data-kpi="sales">營業額</label>
@@ -320,7 +308,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-sm font-semibold">5) 廢棄／超用 趨勢圖（雙指標線）</div>
-            <div class="text-xs muted mt-1">金額總計（平均/日）＋構成比（平均）。</div>
+            
           </div>
           <div class="flex flex-wrap gap-2 items-center">
             <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
@@ -356,12 +344,12 @@
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
           <div class="lg:col-span-5">
             <label class="text-xs muted">品名搜尋（輸入關鍵字）</label>
-            <input id="productSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：握便當 / 雞胸 / 義大利麵…" />
+            <input id="productSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="" />
             <div id="productSuggest" class="mt-1 hidden"></div>
           </div>
           <div class="lg:col-span-5">
             <label class="text-xs muted">半成品名搜尋（輸入關鍵字）</label>
-            <input id="semiSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：飯 / 麵 / 醬 / 配菜…" />
+            <input id="semiSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="" />
             <div id="semiSuggest" class="mt-1 hidden"></div>
           </div>
           <div class="lg:col-span-2 flex gap-2">
@@ -615,34 +603,53 @@ function parseSummaryFromWB(wb) {
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
   if (!rows || !rows.length) return [];
 
-  // header row contains "日期"
+  // 找到 header row：包含「日期」
   let hRow = -1;
   for (let i=0;i<rows.length;i++) {
-    if (normalizeHeader(rows[i][0]).includes('日期')) { hRow = i; break; }
+    const r = (rows[i] || []).map(normalizeHeader);
+    if (r.some(x => x === '日期' || x.includes('日期'))) { hRow = i; break; }
   }
   if (hRow < 0) return [];
 
-  const header = rows[hRow].map(normalizeHeader);
-  const col = (name) => header.findIndex(h => h===name);
-  const idxDate = 0;
+  const header = (rows[hRow] || []).map(normalizeHeader);
+  const sub = (rows[hRow+1] || []).map(normalizeHeader);
 
-  const idxSales = header.findIndex(h => h.includes('營業額'));
-  const idxScrapAmt = header.findIndex(h => h.includes('報廢金額'));
-  const idxScrapRate = header.findIndex(h => h.includes('報廢率'));
-  const idxOverAmt = header.findIndex(h => h.includes('超用金額'));
-  const idxOverRate = header.findIndex(h => h.includes('超用率'));
-  const idxTopScrapAmt = header.findIndex(h => h.includes('廢棄前10名金額總計'));
-  const idxTopScrapShare = header.findIndex(h => h.includes('廢棄前10名構成比'));
-  const idxTopOverAmt = header.findIndex(h => h.includes('超用前10名金額總計'));
-  const idxTopOverShare = header.findIndex(h => h.includes('超用前10名構成比'));
-  const idxSharedAmt = header.findIndex(h => h.includes('共用類廢棄金額總計'));
-  const idxSharedShare = header.findIndex(h => h.includes('共用類廢棄構成比'));
+  const findIdx = (predicate) => header.findIndex(predicate);
+
+  const idxDate = findIdx(h => h === '日期' || h.includes('日期'));
+  const idxSales = findIdx(h => h.includes('營業額'));
+
+  // 報廢額 / 超用額：避免誤抓「率」
+  const idxScrapAmt = findIdx(h => h.includes('報廢') && !h.includes('率') && (h.includes('額') || h.includes('金額')));
+  const idxScrapRate = findIdx(h => h.includes('報廢率'));
+  const idxOverAmt = findIdx(h => h.includes('超用') && !h.includes('率') && (h.includes('額') || h.includes('金額')));
+  const idxOverRate = findIdx(h => h.includes('超用率'));
+
+  // 多層表頭（廢棄前10名 / 超用前10名 / 共用類廢棄）：
+  // header 可能只有第一欄有群組名，第二欄為空；因此用「當欄或前一欄」判斷群組歸屬
+  const groupAt = (i) => (header[i] || header[i-1] || '');
+  const findGroupSub = (groupKw, subKw) => {
+    for (let i=0;i<Math.max(header.length, sub.length);i++) {
+      const g = groupAt(i);
+      const s = sub[i] || '';
+      if (g.includes(groupKw) && s.includes(subKw)) return i;
+    }
+    return -1;
+  };
+
+  const idxTopScrapAmt = findGroupSub('廢棄前10名', '金額總計');
+  const idxTopScrapShare = findGroupSub('廢棄前10名', '構成比');
+  const idxTopOverAmt = findGroupSub('超用前10名', '金額總計');
+  const idxTopOverShare = findGroupSub('超用前10名', '構成比');
+  const idxSharedAmt = findGroupSub('共用類廢棄', '金額總計');
+  const idxSharedShare = findGroupSub('共用類廢棄', '構成比');
 
   const out = [];
-  for (let r=hRow+1;r<rows.length;r++) {
+  for (let r=hRow+2;r<rows.length;r++) { // hRow+1 為子表頭
     const row = rows[r];
     const d = parseMaybeDate(row[idxDate]);
     if (!d) continue;
+
     out.push({
       date: toISO(d),
       sales: Number(row[idxSales] ?? 0) || 0,
@@ -663,7 +670,13 @@ function parseSummaryFromWB(wb) {
 
 function parseDetailsFromWB(wb) {
   const out = [];
-  const sheets = wb.SheetNames.filter(n => n.includes('合計') && !n.replace(/\s+/g,'').includes('日別報廢率總表'));
+  // 只抓「合計MMDD」這類日別明細頁（避免合計/01-30合計等公式頁造成全空或重覆）
+  const sheets = wb.SheetNames.filter(n => {
+    const t = n.replace(/\s+/g,'');
+    const m = t.match(/^合計(\d{3,4})$/); // e.g. 合計1224 / 合計0105
+    return !!m;
+  });
+
   for (const sname of sheets) {
     const ws = wb.Sheets[sname];
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
@@ -671,18 +684,17 @@ function parseDetailsFromWB(wb) {
 
     // find header row (contains 商品名稱 & 半成品名稱)
     let h = -1;
-    for (let i=0;i<Math.min(rows.length, 20);i++) {
-      const row = rows[i].map(normalizeHeader);
-      if (row.some(x => x.includes('商品名稱')) && row.some(x => x.includes('半成品名稱'))) {
-        h = i; break;
-      }
+    for (let i=0;i<Math.min(rows.length, 25);i++) {
+      const row = (rows[i] || []).map(normalizeHeader);
+      if (row.some(x => x.includes('商品名稱')) && row.some(x => x.includes('半成品名稱'))) { h = i; break; }
     }
     if (h < 0) continue;
 
-    const header = rows[h].map(normalizeHeader);
+    const header = (rows[h] || []).map(normalizeHeader);
     const idx = (kw) => header.findIndex(h => h.includes(kw));
 
-    const iDate = idx('日期') >= 0 ? idx('日期') : 0; // some files label as 序號 but values are dates
+    // 這些「合計MMDD」頁第一欄多為「序號」但實際內容是日期
+    const iDate = idx('日期') >= 0 ? idx('日期') : 0;
     const iProd = idx('商品名稱');
     const iSemi = idx('半成品名稱');
     const iPrice = idx('單價');
@@ -899,9 +911,7 @@ function filterByRange(arr, start, end) {
 }
 
 function aggGranularity(start, end) {
-  const forced = $('granSel').value;
-  if (forced !== 'auto') return forced;
-
+  // 顯示粒度改為固定「自動」：依模式與範圍長度推定
   if (state.mode === 'year') return 'month';
   const sd = parseMaybeDate(start);
   const ed = parseMaybeDate(end);
