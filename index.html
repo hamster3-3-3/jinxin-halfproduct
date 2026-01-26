@@ -290,7 +290,7 @@
           </div>
         </div>
         <div class="mt-3">
-          <canvas id="kpiChart" height="140"></canvas>
+          <canvas id="kpiChart" height="220"></canvas>
         </div>
       </div>
 
@@ -301,13 +301,20 @@
             
           </div>
           <div class="flex flex-wrap gap-2 items-center">
-            <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
-            <button class="seg-btn" data-right="overTop10">超用前10名</button>
-            <button class="seg-btn" data-right="shared">共用類廢棄</button>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
+              <button class="seg-btn" data-right="overTop10">超用前10名</button>
+              <button class="seg-btn" data-right="shared">共用類廢棄</button>
+            </div>
+            <div class="h-6 w-px bg-slate-200 mx-1"></div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button class="seg-btn active" data-right-metric="amt">金額</button>
+              <button class="seg-btn" data-right-metric="share">構成比</button>
+            </div>
           </div>
         </div>
         <div class="mt-3">
-          <canvas id="rightChart" height="140"></canvas>
+          <canvas id="rightChart" height="220"></canvas>
         </div>
       </div>
     </div>
@@ -457,6 +464,7 @@ const state = {
   },
   kpiSelected: ['sales'],
   rightMode: 'scrapTop10',
+  rightMetric: 'amt',
   groupRows: [],
   filteredGroups: [],
   selectedKey: null,
@@ -487,6 +495,13 @@ const fmtPct = (n) => {
   if (!Number.isFinite(n)) return '—';
   return (n * 100).toFixed(2) + '%';
 };
+const shortLabel = (s) => {
+  if (typeof s !== 'string') return String(s ?? '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(5); // MM-DD
+  if (/^\d{4}-\d{2}$/.test(s)) return s.slice(5);       // MM
+  return s;
+};
+
 const toISO = (d) => {
   const z = new Date(d);
   const yyyy = z.getFullYear();
@@ -778,19 +793,22 @@ async function loadAllData() {
 function buildSelectors() {
   const years = Array.from(new Set(state.summary.map(r => r.date.slice(0,4)))).sort();
   state.years = years;
-
   $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-  // month options depend on year
-  const monthsAll = Array.from(new Set(state.summary.map(r => r.date.slice(0,7)))).sort();
-  state.months = monthsAll;
+  // months by year (only show months with data)
+  const monthsByYear = new Map();
+  for (const r of state.summary) {
+    const y = r.date.slice(0,4);
+    const mm = r.date.slice(5,7);
+    if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
+    monthsByYear.get(y).add(mm);
+  }
+  state.monthsByYear = {};
+  for (const [y, set] of monthsByYear.entries()) {
+    state.monthsByYear[y] = Array.from(set).sort();
+  }
 
-  $('monthSel').innerHTML = Array.from({length:12}, (_,i)=>i+1).map(m => {
-    const mm = String(m).padStart(2,'0');
-    return `<option value="${mm}">${m} 月</option>`;
-  }).join('');
-
-  // week list (週二～週一)
+  // week list (週二～週一) built from all summary dates
   const weekStart = (dateStr) => {
     const d = parseMaybeDate(dateStr);
     if (!d) return null;
@@ -800,6 +818,7 @@ function buildSelectors() {
     s.setDate(s.getDate() - diff);
     return s;
   };
+
   const wkMap = new Map();
   for (const r of state.summary) {
     const s = weekStart(r.date);
@@ -807,29 +826,81 @@ function buildSelectors() {
     const key = toISO(s);
     if (!wkMap.has(key)) {
       const e = new Date(s);
-      e.setDate(e.getDate()+6);
-      wkMap.set(key, {start:key, end:toISO(e)});
+      e.setDate(e.getDate() + 6);
+      wkMap.set(key, { start: key, end: toISO(e) });
     }
   }
-  state.weeks = Array.from(wkMap.values()).sort((a,b)=>a.start.localeCompare(b.start));
-  $('weekSel').innerHTML = state.weeks.map(w => `<option value="${w.start}">${w.start} ～ ${w.end}</option>`).join('');
+  state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>a.start.localeCompare(b.start));
+
+  const renderMonthOptions = (year) => {
+    const months = state.monthsByYear[year] || [];
+    if (!months.length) {
+      $('monthSel').innerHTML = `<option value="">—</option>`;
+      return;
+    }
+    $('monthSel').innerHTML = months.map(mm => {
+      const mNum = Number(mm);
+      return `<option value="${mm}">${mNum} 月</option>`;
+    }).join('');
+  };
+
+  const filterWeeksForYM = (year, month) => {
+    if (!year || !month) return [];
+    const s = new Date(Number(year), Number(month) - 1, 1);
+    const e = new Date(Number(year), Number(month), 0);
+    const out = [];
+    for (const w of state.weeksAll) {
+      const ws = new Date(w.start);
+      const we = new Date(w.end);
+      // overlap with month range
+      if (we < s || ws > e) continue;
+      out.push(w);
+    }
+    return out;
+  };
+
+  const renderWeekOptions = (year, month, preferStart=null) => {
+    const weeks = filterWeeksForYM(year, month);
+    state.weeks = weeks;
+    if (!weeks.length) {
+      $('weekSel').innerHTML = `<option value="">（無週別資料）</option>`;
+      $('weekSel').value = '';
+      return;
+    }
+    $('weekSel').innerHTML = weeks.map(w => `<option value="${w.start}">${w.start} ～ ${w.end}</option>`).join('');
+    if (preferStart && weeks.some(w => w.start === preferStart)) {
+      $('weekSel').value = preferStart;
+    } else {
+      $('weekSel').value = weeks[weeks.length - 1].start; // latest in month
+    }
+  };
+
+  // expose to wireUI
+  state.renderMonthOptions = renderMonthOptions;
+  state.renderWeekOptions = renderWeekOptions;
 
   // default: latest year
   const latestYear = state.dateMax.slice(0,4);
   $('yearSel').value = latestYear;
   state.selection.year = latestYear;
 
-  // default month: latest month
-  $('monthSel').value = state.dateMax.slice(5,7);
-  state.selection.month = state.dateMax.slice(5,7);
+  // month options for year, default to latest month in data (or last available)
+  renderMonthOptions(latestYear);
+  let defMonth = state.dateMax.slice(5,7);
+  const availMonths = state.monthsByYear[latestYear] || [];
+  if (availMonths.length && !availMonths.includes(defMonth)) defMonth = availMonths[availMonths.length - 1] || defMonth;
+  $('monthSel').value = defMonth || '';
+  state.selection.month = defMonth || '';
 
-  // default week: latest date's week
-  const latestWeekStart = weekStart(state.dateMax);
-  if (latestWeekStart) {
-    $('weekSel').value = toISO(latestWeekStart);
-    state.selection.weekStart = toISO(latestWeekStart);
-  }
+  // week options constrained by selected year+month
+  const prefer = (() => {
+    const s = weekStart(state.dateMax);
+    return s ? toISO(s) : null;
+  })();
+  renderWeekOptions(latestYear, defMonth, prefer);
+  state.selection.weekStart = $('weekSel').value || '';
 
+  // day defaults
   $('daySel').value = state.dateMax;
   state.selection.day = state.dateMax;
 
@@ -842,10 +913,8 @@ function buildSelectors() {
   for (const btn of document.querySelectorAll('button[data-kpi-single]')) {
     btn.classList.toggle('active', btn.dataset.kpiSingle === state.kpiSelected[0]);
   }
-for (const cb of document.querySelectorAll('input[type=checkbox][data-item]')) {
-    cb.checked = ['prodRate','diffAmt'].includes(cb.dataset.item);
-  }
 }
+
 
 function getDateRange() {
   const mode = state.mode;
@@ -991,39 +1060,44 @@ function renderKPIChart(srows, start, end) {
   destroyChart('kpi');
   const gran = aggGranularity(start, end);
 
-  const selected = state.kpiSelected.length ? [state.kpiSelected[0]] : [];
-  if (!selected.length) return;
+  const metric = state.kpiSelected && state.kpiSelected.length ? state.kpiSelected[0] : null;
+  if (!metric) return;
 
   const metricMeta = {
-    sales: {label:'營業額', axis:'y', kind:'amt'},
-    scrapAmt: {label:'報廢額', axis:'y', kind:'amt'},
-    overuseAmt: {label:'超用額', axis:'y', kind:'amt'},
-    scrapRate: {label:'報廢率', axis:'y1', kind:'rate'},
-    overuseRate: {label:'超用率', axis:'y1', kind:'rate'},
+    sales: {label:'營業額', kind:'amt'},
+    scrapAmt: {label:'報廢額', kind:'amt'},
+    overuseAmt: {label:'超用額', kind:'amt'},
+    scrapRate: {label:'報廢率', kind:'rate'},
+    overuseRate: {label:'超用率', kind:'rate'},
   };
+  const meta = metricMeta[metric] || {label: metric, kind:'amt'};
 
-  const labels = (() => {
-    // use labels from first series
-    const s = aggregateSeries(srows, selected[0], gran);
-    return s.labels;
-  })();
+  const s = aggregateSeries(srows, metric, gran);
+  const labels = s.labels;
 
-  const datasets = selected.map((m, idx) => {
-    const s = aggregateSeries(srows, m, gran);
-    const meta = metricMeta[m];
-    return {
-      label: meta.label,
-      data: s.values,
-      yAxisID: meta.axis,
-      tension: 0.25,
-      pointRadius: labels.length > 45 ? 0 : 2
-    };
-  });
+  const unitText = meta.kind === 'rate' ? '%' : 'NT$';
+  const fmtTick = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '';
+    if (meta.kind === 'rate') return (n * 100).toFixed(1);
+    return Math.round(n).toLocaleString('zh-TW');
+  };
+  const fmtTip = (v) => meta.kind === 'rate' ? fmtPct(v) : fmtMoney(v);
 
   const ctx = $('kpiChart').getContext('2d');
   state.charts.kpi = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets },
+    data: {
+      labels,
+      datasets: [
+        {
+          label: meta.label,
+          data: s.values,
+          tension: 0.25,
+          pointRadius: labels.length > 45 ? 0 : 2
+        }
+      ]
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1032,28 +1106,23 @@ function renderKPIChart(srows, start, end) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const id = ctx.dataset.yAxisID;
-              const v = ctx.parsed.y;
-              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
-            }
+            title: (items) => items && items.length ? items[0].label : '',
+            label: (ctx) => ' ' + meta.label + ': ' + fmtTip(ctx.parsed.y)
           }
         }
       },
       scales: {
-        y: {
-          beginAtZero: true,
+        x: {
           ticks: {
-            callback: (v) => fmtMoney(v).replace('NT$ ','')
+            callback: function(value) {
+              return shortLabel(this.getLabelForValue(value));
+            }
           }
         },
-        y1: {
+        y: {
           beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: {
-            callback: (v) => (v*100).toFixed(1) + '%'
-          }
+          title: { display: true, text: unitText },
+          ticks: { callback: (v) => fmtTick(v) }
         }
       }
     }
@@ -1073,10 +1142,24 @@ function renderRightChart(srows, start, end) {
     amtKey = 'sharedAmt'; shareKey = 'sharedShare'; title = '共用類廢棄';
   }
 
-  const sAmt = aggregateSeries(srows, amtKey, gran);
-  const sShare = aggregateSeries(srows, shareKey, gran);
+  const isShare = state.rightMetric === 'share';
+  const metricKey = isShare ? shareKey : amtKey;
+  const meta = { kind: isShare ? 'rate' : 'amt' };
+  const unitText = meta.kind === 'rate' ? '%' : 'NT$';
+  const fmtTick = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '';
+    if (meta.kind === 'rate') return (n * 100).toFixed(1);
+    return Math.round(n).toLocaleString('zh-TW');
+  };
+  const fmtTip = (v) => meta.kind === 'rate' ? fmtPct(v) : fmtMoney(v);
 
-  const labels = sAmt.labels;
+  const s = aggregateSeries(srows, metricKey, gran);
+  const labels = s.labels;
+
+  let dsLabel = title + (isShare ? '｜構成比（平均）' : '｜金額總計（平均/日）');
+  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)（平均）';
+
   const ctx = $('rightChart').getContext('2d');
   state.charts.right = new Chart(ctx, {
     type: 'line',
@@ -1084,16 +1167,8 @@ function renderRightChart(srows, start, end) {
       labels,
       datasets: [
         {
-          label: title + '｜金額總計（平均/日）',
-          data: sAmt.values,
-          yAxisID: 'y',
-          tension: 0.25,
-          pointRadius: labels.length > 45 ? 0 : 2
-        },
-        {
-          label: title + '｜構成比（平均）',
-          data: sShare.values,
-          yAxisID: 'y1',
+          label: dsLabel,
+          data: s.values,
           tension: 0.25,
           pointRadius: labels.length > 45 ? 0 : 2
         }
@@ -1107,35 +1182,30 @@ function renderRightChart(srows, start, end) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const id = ctx.dataset.yAxisID;
-              const v = ctx.parsed.y;
-              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
-            }
+            title: (items) => items && items.length ? items[0].label : '',
+            label: (ctx) => ' ' + dsLabel + ': ' + fmtTip(ctx.parsed.y)
           }
         }
       },
       scales: {
-        y: {
-          beginAtZero: true,
+        x: {
           ticks: {
-            callback: (v) => fmtMoney(v).replace('NT$ ','')
+            callback: function(value) {
+              return shortLabel(this.getLabelForValue(value));
+            }
           }
         },
-        y1: {
+        y: {
           beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: {
-            callback: (v) => (v*100).toFixed(1) + '%'
-          }
+          title: { display: true, text: unitText },
+          ticks: { callback: (v) => fmtTick(v) }
         }
       }
     }
   });
 }
 
-function aggregateGroups(drows) {
+function aggregateGroupsfunction aggregateGroups(drows) {
   const map = new Map();
   for (const r of drows) {
     const key = r.product + '||' + r.semi;
@@ -1376,6 +1446,11 @@ function renderItemChart(daily) {
         }
       },
       scales: {
+        x: {
+          ticks: {
+            callback: function(value) { return shortLabel(this.getLabelForValue(value)); }
+          }
+        },
         y: {
           beginAtZero: true,
           ticks: { callback: (v)=>fmtMoney(v).replace('NT$ ','') }
@@ -1482,6 +1557,29 @@ function wireUI() {
       state.rightMode = btn.dataset.right;
       renderAll();
     });
+  // right chart metric buttons
+  document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.rightMetric = btn.dataset.rightMetric;
+      renderAll();
+    });
+  });
+
+  // keep week options aligned with selected year/month (no need to press 套用)
+  $('yearSel').addEventListener('change', () => {
+    const y = $('yearSel').value;
+    if (state.renderMonthOptions) state.renderMonthOptions(y);
+    const m = $('monthSel').value;
+    if (state.renderWeekOptions) state.renderWeekOptions(y, m, null);
+  });
+  $('monthSel').addEventListener('change', () => {
+    const y = $('yearSel').value;
+    const m = $('monthSel').value;
+    if (state.renderWeekOptions) state.renderWeekOptions(y, m, null);
+  });
+
   });
 
   // apply
