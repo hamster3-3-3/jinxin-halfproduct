@@ -593,7 +593,34 @@ function findSheetName(wb, keyword) {
   return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
 }
 
-function parseSummaryFromWB(wb) {
+
+// Parse file start date from filename like "2025-1101-1131晉欣半成品報廢管理表.xlsx"
+function parseFileStartFromName(fileName) {
+  if (!fileName) return null;
+  const m = String(fileName).match(/(\d{4})-(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null;
+  return new Date(y, mm - 1, dd);
+}
+function ymToIndex(ym) {
+  const m = String(ym).match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  return y * 12 + mo; // mo: 1-12
+}
+function shiftISOByMonths(iso, deltaMonths) {
+  const d = parseMaybeDate(iso);
+  if (!d) return iso;
+  d.setMonth(d.getMonth() + deltaMonths);
+  return toISO(d);
+}
+
+
+function parseSummaryFromWB(wb, fileName) {
   const sname = wb.SheetNames.find(n => n.replace(/\s+/g,'').includes('日別報廢率總表')) || null;
   if (!sname) return [];
   const ws = wb.Sheets[sname];
@@ -662,6 +689,32 @@ function parseSummaryFromWB(wb) {
       sharedShare: Number(row[idxSharedShare] ?? 0) || 0,
     });
   }
+  
+  // 有些檔案的「日別報廢率總表」日期欄可能仍保留上月快取（例如 11 月檔案顯示 10 月日期）
+  // 以檔名的起始年月作為參照，若主體年月不一致，則整體平移月份，避免月份缺漏（例如缺少 11 月）。
+  const fileStart = parseFileStartFromName(fileName);
+  if (fileStart && out.length) {
+    const expYM = toISO(fileStart).slice(0,7);
+    const counts = new Map();
+    for (const r of out) {
+      const ym = String(r.date).slice(0,7);
+      counts.set(ym, (counts.get(ym) || 0) + 1);
+    }
+    let domYM = null, domN = 0;
+    for (const [k, v] of counts.entries()) {
+      if (v > domN) { domN = v; domYM = k; }
+    }
+    const a = ymToIndex(domYM);
+    const b = ymToIndex(expYM);
+    if (a != null && b != null && domYM && expYM && domYM !== expYM) {
+      const delta = b - a;
+      // 僅在差距合理（±2 個月）時才平移，避免誤判
+      if (Math.abs(delta) <= 2) {
+        for (const r of out) r.date = shiftISOByMonths(r.date, delta);
+      }
+    }
+  }
+
   return out;
 }
 
@@ -773,7 +826,7 @@ async function loadAllData() {
     if (!r.ok) throw new Error('讀取失敗：' + f);
     const ab = await r.arrayBuffer();
     const wb = XLSX.read(ab, {type:'array', cellDates:true});
-    sum = sum.concat(parseSummaryFromWB(wb));
+    sum = sum.concat(parseSummaryFromWB(wb, f));
     det = det.concat(parseDetailsFromWB(wb));
   }
 
@@ -1056,6 +1109,26 @@ function destroyChart(key) {
   if (c) { c.destroy(); state.charts[key] = null; }
 }
 
+
+function computeBounds(values, kind) {
+  const arr = (values || []).map(Number).filter(v => Number.isFinite(v));
+  if (!arr.length) return null;
+  let mn = Math.min(...arr);
+  let mx = Math.max(...arr);
+  if (mn === mx) {
+    const pad = mn === 0 ? 1 : Math.abs(mn) * 0.08;
+    mn -= pad; mx += pad;
+  } else {
+    const pad = (mx - mn) * 0.08;
+    mn -= pad; mx += pad;
+  }
+  // clamp for amounts / rates
+  if (kind === 'amt' || kind === 'rate') mn = Math.max(0, mn);
+  if (kind === 'rate') mx = Math.min(1, mx); // rate stored as 0~1
+  return { min: mn, max: mx };
+}
+
+
 function renderKPIChart(srows, start, end) {
   destroyChart('kpi');
   const gran = aggGranularity(start, end);
@@ -1074,6 +1147,7 @@ function renderKPIChart(srows, start, end) {
 
   const s = aggregateSeries(srows, metric, gran);
   const labels = s.labels;
+  const bounds = computeBounds(s.values, meta.kind);
 
   const unitText = meta.kind === 'rate' ? '%' : 'NT$';
   const fmtTick = (v) => {
@@ -1120,8 +1194,10 @@ function renderKPIChart(srows, start, end) {
           }
         },
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
           title: { display: true, text: unitText },
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
           ticks: { callback: (v) => fmtTick(v) }
         }
       }
@@ -1156,6 +1232,7 @@ function renderRightChart(srows, start, end) {
 
   const s = aggregateSeries(srows, metricKey, gran);
   const labels = s.labels;
+  const bounds = computeBounds(s.values, meta.kind);
 
   let dsLabel = title + (isShare ? '｜構成比（平均）' : '｜金額總計（平均/日）');
   if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)（平均）';
@@ -1196,8 +1273,10 @@ function renderRightChart(srows, start, end) {
           }
         },
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
           title: { display: true, text: unitText },
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
           ticks: { callback: (v) => fmtTick(v) }
         }
       }
@@ -1318,7 +1397,11 @@ function renderSuggest(containerId, items, onClick) {
     </div>
   `).join('');
   wrap.querySelectorAll('[data-idx]').forEach(el => {
-    el.addEventListener('click', () => onClick(items[Number(el.dataset.idx)]));
+    el.addEventListener('click', () => {
+      onClick(items[Number(el.dataset.idx)]);
+      wrap.classList.add('hidden');
+      wrap.innerHTML = '';
+    });
   });
 }
 
@@ -1330,14 +1413,27 @@ function getSelectedRangeRows() {
 }
 
 function renderAll() {
-  const {start, end, srows, drows} = getSelectedRangeRows();
-updateKPICards(srows);
+  const { start, end, srows, drows } = getSelectedRangeRows();
+  state.view = { start, end, srows, drows };
 
+  updateKPICards(srows);
   renderKPIChart(srows, start, end);
   renderRightChart(srows, start, end);
-
   applyGroupFilterAndRender(drows);
 }
+
+function renderKPIOnly() {
+  if (!state.view) return renderAll();
+  renderKPIChart(state.view.srows, state.view.start, state.view.end);
+}
+
+function renderRightOnly() {
+  if (!state.view) return renderAll();
+  renderRightChart(state.view.srows, state.view.start, state.view.end);
+}
+
+
+
 
 function renderSelectedItem() {
   if (!state.selectedKey) {
@@ -1452,7 +1548,7 @@ function renderItemChart(daily) {
           }
         },
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
           ticks: { callback: (v)=>fmtMoney(v).replace('NT$ ','') }
         },
         y1: {
@@ -1555,7 +1651,7 @@ function wireUI() {
       document.querySelectorAll('button.seg-btn[data-right]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.rightMode = btn.dataset.right;
-      renderAll();
+      renderRightOnly();
     });
   });
 
@@ -1565,7 +1661,7 @@ function wireUI() {
       document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.rightMetric = btn.dataset.rightMetric;
-      renderAll();
+      renderRightOnly();
     });
   });
 
@@ -1618,7 +1714,7 @@ function wireUI() {
       document.querySelectorAll('button[data-kpi-single]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.kpiSelected = [btn.dataset.kpiSingle];
-      renderAll();
+      renderKPIOnly();
     });
   });
 // item chart selection
@@ -1639,6 +1735,8 @@ function wireUI() {
       $('productSearch').value = row.product;
       $('semiSearch').value = row.semi;
       state.selectedKey = row.key;
+      $('productSuggest').classList.add('hidden');
+      $('semiSuggest').classList.add('hidden');
       renderAll();
       renderSelectedItem();
     });
@@ -1652,6 +1750,8 @@ function wireUI() {
       $('productSearch').value = row.product;
       $('semiSearch').value = row.semi;
       state.selectedKey = row.key;
+      $('productSuggest').classList.add('hidden');
+      $('semiSuggest').classList.add('hidden');
       renderAll();
       renderSelectedItem();
     });
