@@ -165,7 +165,7 @@
     <div class="mt-4 card p-4">
       <div class="flex flex-col gap-4">
         <div class="flex flex-wrap items-center gap-2">
-          <div class="text-sm font-semibold mr-2">1) 選擇時間範圍</div>
+          <div class="text-sm font-semibold mr-2">選擇時間範圍</div>
           <button class="seg-btn active" data-mode="year">年別</button>
           <button class="seg-btn" data-mode="month">月別</button>
           <button class="seg-btn" data-mode="week">週別</button>
@@ -175,7 +175,7 @@
 
         <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
           <div class="md:col-span-3" id="yearWrap">
-            <label class="text-xs muted">年別</label>
+            <label class="text-xs muted">年別（目前內建為 2025 / 2026）</label>
             <select id="yearSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
           </div>
 
@@ -185,7 +185,7 @@
           </div>
 
           <div class="md:col-span-4 hidden" id="weekWrap">
-            <label class="text-xs muted">週別（週二～週一）</label>
+            <label class="text-xs muted">週別（週二至週一）</label>
             <select id="weekSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
           </div>
 
@@ -277,15 +277,16 @@
       <div class="card p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">4) KPI 趨勢圖（最多選 2 個指標）</div>
+            <div class="text-sm font-semibold">KPI 趨勢圖</div>
             
           </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="sales">營業額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapAmt">報廢額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapRate">報廢率</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseAmt">超用額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseRate">超用率</label>
+          
+          <div class="flex flex-wrap gap-2 items-center" id="kpiSingleWrap">
+            <button class="seg-btn active" type="button" data-kpi-single="sales">營業額</button>
+            <button class="seg-btn" type="button" data-kpi-single="scrapAmt">報廢額</button>
+            <button class="seg-btn" type="button" data-kpi-single="scrapRate">報廢率</button>
+            <button class="seg-btn" type="button" data-kpi-single="overuseAmt">超用額</button>
+            <button class="seg-btn" type="button" data-kpi-single="overuseRate">超用率</button>
           </div>
         </div>
         <div class="mt-3">
@@ -296,7 +297,7 @@
       <div class="card p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">5) 廢棄／超用 趨勢圖（雙指標線）</div>
+            <div class="text-sm font-semibold">廢棄／超用 趨勢圖</div>
             
           </div>
           <div class="flex flex-wrap gap-2 items-center">
@@ -316,7 +317,7 @@
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">6) 半成品展開</div>
+            <div class="text-sm font-semibold">半成品展開</div>
 </div>
           <div class="flex flex-wrap gap-2 items-center">
             <div class="text-xs muted">排序依據</div>
@@ -454,7 +455,7 @@ const state = {
     start: null,
     end: null
   },
-  kpiSelected: ['sales','scrapAmt'],
+  kpiSelected: ['sales'],
   rightMode: 'scrapTop10',
   groupRows: [],
   filteredGroups: [],
@@ -837,11 +838,11 @@ function buildSelectors() {
   state.selection.start = state.dateMin;
   state.selection.end = state.dateMax;
 
-  // default KPI selection
-  for (const cb of document.querySelectorAll('input[type=checkbox][data-kpi]')) {
-    cb.checked = state.kpiSelected.includes(cb.dataset.kpi);
+  // default KPI selection (single)
+  for (const btn of document.querySelectorAll('button[data-kpi-single]')) {
+    btn.classList.toggle('active', btn.dataset.kpiSingle === state.kpiSelected[0]);
   }
-  for (const cb of document.querySelectorAll('input[type=checkbox][data-item]')) {
+for (const cb of document.querySelectorAll('input[type=checkbox][data-item]')) {
     cb.checked = ['prodRate','diffAmt'].includes(cb.dataset.item);
   }
 }
@@ -990,7 +991,7 @@ function renderKPIChart(srows, start, end) {
   destroyChart('kpi');
   const gran = aggGranularity(start, end);
 
-  const selected = state.kpiSelected.slice(0,2);
+  const selected = state.kpiSelected.length ? [state.kpiSelected[0]] : [];
   if (!selected.length) return;
 
   const metricMeta = {
@@ -1028,7 +1029,7 @@ function renderKPIChart(srows, start, end) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label: (ctx) => {
@@ -1103,7 +1104,7 @@ function renderRightChart(srows, start, end) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label: (ctx) => {
@@ -1513,22 +1514,16 @@ function wireUI() {
     }
   });
 
-  // KPI selection max 2
-  document.querySelectorAll('input[type=checkbox][data-kpi]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const all = Array.from(document.querySelectorAll('input[type=checkbox][data-kpi]'));
-      const chosen = all.filter(x => x.checked).map(x => x.dataset.kpi);
-      if (chosen.length > 2) {
-        cb.checked = false;
-        toast('KPI 趨勢圖最多選 2 個指標');
-        return;
-      }
-      state.kpiSelected = chosen;
+  // KPI selection (single)
+  document.querySelectorAll('button[data-kpi-single]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button[data-kpi-single]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.kpiSelected = [btn.dataset.kpiSingle];
       renderAll();
     });
   });
-
-  // item chart selection
+// item chart selection
   document.querySelectorAll('input[type=checkbox][data-item]').forEach(cb => {
     cb.addEventListener('change', () => {
       if (!state.selectedKey) return;
@@ -1577,7 +1572,7 @@ function wireUI() {
 
 function syncModeUI() {
   $('yearWrap').classList.toggle('hidden', false);
-  $('monthWrap').classList.toggle('hidden', state.mode !== 'month');
+  $('monthWrap').classList.toggle('hidden', !(state.mode === 'month' || state.mode === 'week'));
   $('weekWrap').classList.toggle('hidden', state.mode !== 'week');
   $('dayWrap').classList.toggle('hidden', state.mode !== 'day');
   $('rangeWrap').classList.toggle('hidden', state.mode !== 'range');
