@@ -1205,7 +1205,7 @@ function renderRightChart(srows, start, end) {
   });
 }
 
-function aggregateGroupsfunction aggregateGroups(drows) {
+function aggregateGroups(drows) {
   const map = new Map();
   for (const r of drows) {
     const key = r.product + '||' + r.semi;
@@ -1557,7 +1557,9 @@ function wireUI() {
       state.rightMode = btn.dataset.right;
       renderAll();
     });
-  // right chart metric buttons
+  });
+
+  // right chart metric buttons（金額 / 構成比）
   document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(b => b.classList.remove('active'));
@@ -1567,7 +1569,7 @@ function wireUI() {
     });
   });
 
-  // keep week options aligned with selected year/month (no need to press 套用)
+  // keep week options aligned with selected year/month（不需按「套用」也會更新週別清單）
   $('yearSel').addEventListener('change', () => {
     const y = $('yearSel').value;
     if (state.renderMonthOptions) state.renderMonthOptions(y);
@@ -1578,8 +1580,6 @@ function wireUI() {
     const y = $('yearSel').value;
     const m = $('monthSel').value;
     if (state.renderWeekOptions) state.renderWeekOptions(y, m, null);
-  });
-
   });
 
   // apply
