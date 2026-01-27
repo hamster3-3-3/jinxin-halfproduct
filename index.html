@@ -397,7 +397,7 @@
             </div>
 
             <div class="card p-3">
-              <canvas id="itemChart" height="160"></canvas>
+              <canvas id="itemChart" height="240"></canvas>
             </div>
 
             <div class="table-wrap">
@@ -1132,18 +1132,25 @@ function destroyChart(key) {
 function computeBounds(values, kind) {
   const arr = (values || []).map(Number).filter(v => Number.isFinite(v));
   if (!arr.length) return null;
+
   let mn = Math.min(...arr);
   let mx = Math.max(...arr);
+
+  // padding
   if (mn === mx) {
-    const pad = mn === 0 ? 1 : Math.abs(mn) * 0.08;
+    const pad = (mn === 0) ? 1 : Math.max(0.02, Math.abs(mn) * 0.08);
     mn -= pad; mx += pad;
   } else {
-    const pad = (mx - mn) * 0.08;
+    const pad = Math.max(0.02, (mx - mn) * 0.08);
     mn -= pad; mx += pad;
   }
-  // clamp for amounts / rates
-  if (kind === 'amt' || kind === 'rate' || kind === 'qty') mn = Math.max(0, mn);
-  if (kind === 'rate') mx = Math.min(1, mx); // rate stored as 0~1
+
+  // clamp mins (do NOT clamp max for rate; 實際生產率可能 > 100%)
+  if (kind === 'amt' || kind === 'qty' || kind === 'rate') mn = Math.max(0, mn);
+
+  // ensure sane ordering
+  if (mx <= mn) mx = mn + 1;
+
   return { min: mn, max: mx };
 }
 
@@ -1594,14 +1601,24 @@ function renderItemChart(daily) {
   };
 
   if (mode === 'year') {
+    const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
+
+    // 年別：X 軸固定顯示整年 1~12 月（即使沒有資料也保留月份）
+    for (let mi = 0; mi < 12; mi++) {
+      const key = `${ySel}-${String(mi+1).padStart(2,'0')}`;
+      const d0 = new Date(ySel, mi, 1);
+      const label = `${mi+1}月`;
+      if (!buckets.has(key)) buckets.set(key, { d: d0, label, sum: 0, cnt: 0 });
+    }
+
     for (const r of parsed) {
       const d = r._d;
+      if (d.getFullYear() !== ySel) continue;
       const monthIdx = d.getMonth(); // 0-11
-      const key = `${d.getFullYear()}-${String(monthIdx+1).padStart(2,'0')}`;
-      const label = `${monthIdx+1}月`;
+      const key = `${ySel}-${String(monthIdx+1).padStart(2,'0')}`;
       const v = m.get(r);
       // 年別：金額/數量用「加總」，比率用「平均」
-      addToBucket(key, new Date(d.getFullYear(), monthIdx, 1), label, v);
+      addToBucket(key, new Date(ySel, monthIdx, 1), `${monthIdx+1}月`, v);
     }
   } else if (mode === 'month') {
     for (const r of parsed) {
