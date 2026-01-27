@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>晉欣鮮食廠｜半成品儀表板</title>
+  <link rel="icon" href="data:," />
 
   <!-- Tailwind CSS (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -1032,47 +1033,79 @@ function filterByRange(arr, start, end) {
 }
 
 function aggGranularity(start, end) {
-  // 顯示粒度改為固定「自動」：依模式與範圍長度推定
+  // 顯示粒度：依「模式」決定（避免不同卡片/圖表行為不一致）
   if (state.mode === 'year') return 'month';
+  if (state.mode === 'month') return 'week'; // 月別以週別顯示（週二~週一）
+
   const sd = parseMaybeDate(start);
   const ed = parseMaybeDate(end);
   const days = Math.round((ed - sd) / 86400000) + 1;
+
+  // 其他模式：範圍太大則用週別，其餘用日別
   if (days > 90) return 'week';
   return 'day';
 }
 
 function groupKeyByGran(dateStr, gran) {
   if (gran === 'day') return dateStr;
-  if (gran === 'month') return dateStr.slice(0,7);
-
-  // week (週二～週一)
-  const d = parseMaybeDate(dateStr);
-  const day = d.getDay();
-  const diff = (day - 2 + 7) % 7;
-  const s = new Date(d); s.setDate(s.getDate() - diff);
-  const e = new Date(s); e.setDate(e.getDate() + 6);
-  return toISO(s) + '～' + toISO(e);
+  if (gran === 'month') return dateStr.slice(0, 7);
+  if (gran === 'week') {
+    const d = parseISO(dateStr);
+    const s = weekStartTue(d);
+    // 以「週起始日」做 key，x 軸可自然用 MM-DD 顯示
+    return toISO(s);
+  }
+  return dateStr;
 }
 
-function aggregateSeries(rows, metric, gran) {
+
+function aggregateSeries(rows, metric, gran, start = null, end = null) {
   const buckets = new Map();
+
+  const hasRange = (start instanceof Date) && (end instanceof Date);
+  const startT = hasRange ? start.getTime() : 0;
+  const endT   = hasRange ? end.getTime() : 0;
+
   for (const r of rows) {
-    const k = groupKeyByGran(r.date, gran);
-    if (!buckets.has(k)) buckets.set(k, {k, n:0, sum:0});
+    let k;
+
+    if (gran === 'week') {
+      const d = parseISO(r.date);
+      const ws = weekStartTue(d); // 週二~週一
+      // 月別模式：只顯示「起始日在該月範圍內」的週別
+      if (hasRange && state.mode === 'month') {
+        const t = ws.getTime();
+        if (t < startT || t > endT) continue;
+      }
+      k = toISO(ws);
+    } else {
+      k = groupKeyByGran(r.date, gran);
+    }
+
+    if (!buckets.has(k)) buckets.set(k, {k, n: 0, sum: 0});
     const b = buckets.get(k);
     b.n += 1;
     b.sum += (Number(r[metric]) || 0);
   }
-  const keys = Array.from(buckets.keys()).sort((a,b)=>a.localeCompare(b));
+
+  let keys = Array.from(buckets.keys()).sort((a, b) => a.localeCompare(b));
+
+  // 年別：固定顯示 1~12 月（即使某些月份無資料，也保留 x 軸刻度）
+  if (gran === 'month' && state.mode === 'year' && hasRange) {
+    const y = String(start.getFullYear());
+    keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
+  }
+
   const values = keys.map(k => {
     const b = buckets.get(k);
-    if (metric.endsWith('Rate') || metric.endsWith('Share')) {
-      return b.sum / b.n; // average of rates
-    }
-    return b.sum / b.n;   // average per day (because rows are daily)
+    if (!b) return null;
+    // rate/share：以平均呈現；金額/數量：同樣維持「平均/日」(bucket 內日平均)
+    return b.sum / Math.max(1, b.n);
   });
-  return {labels: keys, values};
+
+  return { labels: keys, values };
 }
+
 
 function updateKPICards(srows) {
   const n = srows.length || 1;
@@ -1156,11 +1189,15 @@ function computeBounds(values, kind) {
 
 
 function renderKPIChart(srows, start, end) {
-  destroyChart('kpi');
   const gran = aggGranularity(start, end);
 
   const metric = state.kpiSelected && state.kpiSelected.length ? state.kpiSelected[0] : null;
   if (!metric) return;
+
+  const _key = `kpi|${metric}|${toISO(start)}|${toISO(end)}|${gran}`;
+  if (state._kpiChartKey === _key) return;
+  state._kpiChartKey = _key;
+  destroyChart('kpi');
 
   const metricMeta = {
     sales: {label:'營業額', kind:'amt'},
@@ -1171,7 +1208,7 @@ function renderKPIChart(srows, start, end) {
   };
   const meta = metricMeta[metric] || {label: metric, kind:'amt'};
 
-  const s = aggregateSeries(srows, metric, gran);
+  const s = aggregateSeries(srows, metric, gran, start, end);
   const labels = s.labels;
   const bounds = computeBounds(s.values, meta.kind);
 
@@ -1232,8 +1269,12 @@ function renderKPIChart(srows, start, end) {
 }
 
 function renderRightChart(srows, start, end) {
-  destroyChart('right');
   const gran = aggGranularity(start, end);
+
+  const _key = `right|${state.rightMode}|${state.rightMetric}|${toISO(start)}|${toISO(end)}|${gran}`;
+  if (state._rightChartKey === _key) return;
+  state._rightChartKey = _key;
+  destroyChart('right');
 
   let amtKey, shareKey, title;
   if (state.rightMode === 'scrapTop10') {
@@ -1256,7 +1297,7 @@ function renderRightChart(srows, start, end) {
   };
   const fmtTip = (v) => meta.kind === 'rate' ? fmtPct(v) : fmtMoney(v);
 
-  const s = aggregateSeries(srows, metricKey, gran);
+  const s = aggregateSeries(srows, metricKey, gran, start, end);
   const labels = s.labels;
   const bounds = computeBounds(s.values, meta.kind);
 
