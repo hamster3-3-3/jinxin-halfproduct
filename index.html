@@ -387,12 +387,12 @@
                 <div class="text-sm font-semibold">商品趨勢圖與日別明細</div>
                 <div id="itemTitle" class="text-xs muted mt-1">—</div>
               </div>
-              <div class="flex flex-wrap gap-2 items-center">
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="prodRate">實際生產率</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="diffAmt">差異金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="scrapAmt">報廢金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="overuseAmt">超用金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="refillQty">補單量</label>
+              <div class="flex flex-wrap gap-2 items-center" id="itemMetricWrap">
+                <button class="seg-btn" type="button" data-item-single="prodRate">實際生產率</button>
+                <button class="seg-btn active" type="button" data-item-single="diffAmt">差異金額</button>
+                <button class="seg-btn" type="button" data-item-single="scrapAmt">報廢金額</button>
+                <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
+                <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
               </div>
             </div>
 
@@ -467,6 +467,7 @@ const state = {
     end: null
   },
   kpiSelected: ['sales'],
+  itemMetricSelected: 'diffAmt',
   rightMode: 'scrapTop10',
   rightMetric: 'amt',
   groupRows: [],
@@ -1141,7 +1142,7 @@ function computeBounds(values, kind) {
     mn -= pad; mx += pad;
   }
   // clamp for amounts / rates
-  if (kind === 'amt' || kind === 'rate') mn = Math.max(0, mn);
+  if (kind === 'amt' || kind === 'rate' || kind === 'qty') mn = Math.max(0, mn);
   if (kind === 'rate') mx = Math.min(1, mx); // rate stored as 0~1
   return { min: mn, max: mx };
 }
@@ -1507,80 +1508,103 @@ function renderSelectedItem() {
 
 function renderItemChart(daily) {
   destroyChart('item');
-  const selected = Array.from(document.querySelectorAll('input[type=checkbox][data-item]'))
-    .filter(cb => cb.checked)
-    .map(cb => cb.dataset.item);
 
-  const meta = {
-    prodRate: {label:'實際生產率', axis:'y1', fmt:(v)=>fmtPct(v)},
-    diffAmt: {label:'差異金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    scrapAmt: {label:'報廢金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    overuseAmt: {label:'超用金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    refillQty: {label:'補單量', axis:'y2', fmt:(v)=>fmtInt(v)},
-  };
-
-  const labels = daily.map(r => r.date);
-  const datasets = selected.map(m => {
-    const axis = meta[m].axis;
-    const data = daily.map(r => {
-      if (m === 'prodRate') return r.prodRate ?? null;
-      if (m === 'refillQty') return r.refill ?? 0;
-      return Number(r[m]) || 0;
-    });
-    return {
-      label: meta[m].label,
-      data,
-      yAxisID: axis,
-      tension: 0.25,
-      pointRadius: labels.length > 45 ? 0 : 2
-    };
+  const metric = state.itemMetricSelected || 'diffAmt';
+  // sync UI active state
+  document.querySelectorAll('button[data-item-single]').forEach(b => {
+    b.classList.toggle('active', b.dataset.itemSingle === metric);
   });
 
+  const meta = {
+    prodRate: {
+      label: '實際生產率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => r.prodRate,
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
+    },
+    diffAmt: {
+      label: '差異金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.diffAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    scrapAmt: {
+      label: '報廢金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.scrapAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    overuseAmt: {
+      label: '超用金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.overuseAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    refillQty: {
+      label: '補單量',
+      kind: 'qty',
+      unitTitle: '數量',
+      get: (r) => r.refill,
+      fmt: (v) => fmtInt(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    }
+  };
+
+  const m = meta[metric] || meta.diffAmt;
+  const labels = daily.map(r => shortLabel(r.date));
+  const values = daily.map(r => {
+    const v = m.get(r);
+    return (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
+  });
+
+  const bounds = computeBounds(values, m.kind);
   const ctx = $('itemChart').getContext('2d');
+
   state.charts.item = new Chart(ctx, {
     type: 'line',
-    data: {labels, datasets},
+    data: {
+      labels,
+      datasets: [{
+        label: m.label,
+        data: values,
+        borderWidth: 3,
+        tension: 0.25,
+        spanGaps: true,
+        pointRadius: 3,
+        pointHoverRadius: 4
+      }]
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode:'index', intersect:false },
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position:'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const m = selected[ctx.datasetIndex];
-              const v = ctx.parsed.y;
-              if (!m) return ' ';
-              if (m === 'prodRate') return ' ' + ctx.dataset.label + ': ' + fmtPct(v);
-              if (m === 'refillQty') return ' ' + ctx.dataset.label + ': ' + fmtInt(v);
-              return ' ' + ctx.dataset.label + ': ' + fmtMoney(v);
-            }
+            label: (c) => `${m.label}：${m.fmt(c.parsed.y)}`
           }
         }
       },
       scales: {
         x: {
-          ticks: {
-            callback: function(value) { return shortLabel(this.getLabelForValue(value)); }
-          }
+          grid: { display: false },
+          ticks: { maxRotation: 0, autoSkip: true }
         },
         y: {
-          beginAtZero: false,
-          ticks: { callback: (v)=>fmtMoney(v).replace('NT$ ','') }
-        },
-        y1: {
           beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea:false },
-          ticks: { callback: (v)=>(v*100).toFixed(1)+'%' }
-        },
-        y2: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea:false },
-          display: selected.includes('refillQty'),
-          ticks: { callback: (v)=>fmtInt(v) }
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
+          title: { display: true, text: m.unitTitle },
+          ticks: { callback: (v) => m.tick(v) }
         }
       }
     }
@@ -1735,9 +1759,12 @@ function wireUI() {
       renderKPIOnly();
     });
   });
-// item chart selection
-  document.querySelectorAll('input[type=checkbox][data-item]').forEach(cb => {
-    cb.addEventListener('change', () => {
+// item chart selection (single)
+  document.querySelectorAll('button[data-item-single]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button[data-item-single]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.itemMetricSelected = btn.dataset.itemSingle;
       if (!state.selectedKey) return;
       renderSelectedItem();
     });
