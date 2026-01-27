@@ -1559,13 +1559,88 @@ function renderItemChart(daily) {
   };
 
   const m = meta[metric] || meta.diffAmt;
-  const labels = daily.map(r => shortLabel(r.date));
-  const values = daily.map(r => {
-    const v = m.get(r);
-    return (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
+
+  // === X 軸顯示規則（依目前時間範圍模式）===
+  // 年別：以「月」為單位（1月、2月…）
+  // 月別：以「週別」為單位（顯示週別起始日：MM/DD）
+  // 週別：以「日別」為單位（顯示 M/D）
+  // 其他（日別/指定範圍）：維持原本 MM-DD
+  const mode = state.mode || 'range';
+  const parsed = daily
+    .map(r => ({ ...r, _d: parseMaybeDate(r.date) }))
+    .filter(r => r._d && !isNaN(r._d));
+
+  parsed.sort((a,b) => a._d - b._d);
+
+  const fmtMD = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+  const fmtMMDD = (d) => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
+  const weekStartTue = (d) => {
+    // 週二～週一：找出「該日所屬週」的週二作為 weekStart
+    const wd = d.getDay(); // 0=Sun ... 2=Tue
+    const diff = (wd - 2 + 7) % 7;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+  };
+
+  const buckets = new Map(); // key -> { d:Date, label:string, sum:number, cnt:number }
+  const isRate = (m.kind === 'rate');
+
+  const addToBucket = (key, d, label, v) => {
+    if (!buckets.has(key)) buckets.set(key, { d, label, sum: 0, cnt: 0 });
+    const b = buckets.get(key);
+    if (v == null || !Number.isFinite(Number(v))) return;
+    b.sum += Number(v);
+    b.cnt += 1;
+  };
+
+  if (mode === 'year') {
+    for (const r of parsed) {
+      const d = r._d;
+      const monthIdx = d.getMonth(); // 0-11
+      const key = `${d.getFullYear()}-${String(monthIdx+1).padStart(2,'0')}`;
+      const label = `${monthIdx+1}月`;
+      const v = m.get(r);
+      // 年別：金額/數量用「加總」，比率用「平均」
+      addToBucket(key, new Date(d.getFullYear(), monthIdx, 1), label, v);
+    }
+  } else if (mode === 'month') {
+    for (const r of parsed) {
+      const ws = weekStartTue(r._d);
+      const key = toISO(ws);
+      const label = fmtMMDD(ws);
+      const v = m.get(r);
+      // 月別：金額/數量用「加總」，比率用「平均」
+      addToBucket(key, ws, label, v);
+    }
+  } else if (mode === 'week') {
+    for (const r of parsed) {
+      const d = r._d;
+      const key = toISO(d);
+      const label = fmtMD(d);
+      const v = m.get(r);
+      addToBucket(key, d, label, v);
+    }
+  } else {
+    // day / range：保持原本的 MM-DD 顯示
+    for (const r of parsed) {
+      const d = r._d;
+      const key = toISO(d);
+      const label = shortLabel(toISO(d));
+      const v = m.get(r);
+      addToBucket(key, d, label, v);
+    }
+  }
+
+  const points = Array.from(buckets.values()).sort((a,b) => a.d - b.d);
+  const labels = points.map(p => p.label);
+  const values = points.map(p => {
+    if (!p.cnt) return null;
+    // 比率 => 平均；金額/數量 => 加總（依你要的「以單位彙總」呈現）
+    return isRate ? (p.sum / p.cnt) : p.sum;
   });
 
   const bounds = computeBounds(values, m.kind);
+
   const ctx = $('itemChart').getContext('2d');
 
   state.charts.item = new Chart(ctx, {
@@ -1600,7 +1675,7 @@ function renderItemChart(daily) {
           ticks: { maxRotation: 0, autoSkip: true }
         },
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
           min: bounds ? bounds.min : undefined,
           max: bounds ? bounds.max : undefined,
           title: { display: true, text: m.unitTitle },
