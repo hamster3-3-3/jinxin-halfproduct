@@ -141,7 +141,10 @@
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+  .sticky-pane{position:sticky;top:12px;z-index:40;}
+.sticky-pane.is-stuck{box-shadow:0 12px 30px rgba(15,23,42,.12);}
+@media (max-width:640px){.sticky-pane{top:8px;}}
+</style>
 
   <!-- Local vendor scripts (GitHub Pages 同網域) -->
   <script src="./xlsx.full.min.js"></script>
@@ -162,7 +165,8 @@
     </div>
 
     <!-- Controls -->
-    <div class="mt-4 card p-4">
+    <div id="stickySentinel" class="h-px"></div>
+    <div id="controlsCard" class="mt-4 card p-4 sticky-pane">
       <div class="flex flex-col gap-4">
         <div class="flex flex-wrap items-center gap-2">
           <div class="text-sm font-semibold mr-2">選擇時間範圍</div>
@@ -484,6 +488,20 @@ const toast = (msg) => {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.style.display = 'none', 3000);
 };
+
+function initStickyControls(){
+  const sentinel = document.getElementById('stickySentinel');
+  const pane = document.getElementById('controlsCard');
+  if (!sentinel || !pane) return;
+  // IntersectionObserver: 當 sentinel 捲出視窗上緣 => pane 進入「凍結」狀態
+  const obs = new IntersectionObserver((entries)=>{
+    const ent = entries[0];
+    // 當 sentinel 不可見（被捲走）代表已開始 stick
+    if (!ent.isIntersecting) pane.classList.add('is-stuck');
+    else pane.classList.remove('is-stuck');
+  }, {root:null, threshold:0});
+  obs.observe(sentinel);
+}
 
 const fmtInt = (n) => (Number.isFinite(n) ? n.toLocaleString('zh-TW') : '—');
 const fmtMoney = (n) => {
@@ -1781,6 +1799,7 @@ async function init(force=false) {
     await loadAllData();
     buildSelectors();
     wireUI();
+    initStickyControls();
     syncModeUI();
     renderAll();
     state.loaded = true;
