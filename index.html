@@ -491,6 +491,34 @@ const toast = (msg) => {
   el._t = setTimeout(() => el.style.display = 'none', 3000);
 };
 
+
+// --- date/string helpers (避免 null.localeCompare、parseISO 未定義而中斷) ---
+function safeStr(x){ return (x===null || x===undefined) ? '' : String(x); }
+function safeLocaleCompare(a,b){ return safeStr(a).localeCompare(safeStr(b)); }
+
+// ISO parse (支援 YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD / Excel serial)
+function parseISO(s){
+  if (!s && s!==0) return null;
+  if (s instanceof Date) return s;
+  if (typeof s === 'number' && isFinite(s)) {
+    // Excel serial date (days since 1899-12-30)
+    const d = new Date(Date.UTC(1899,11,30));
+    d.setUTCDate(d.getUTCDate() + Math.floor(s));
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  const str = String(s).trim();
+  // 民國 114/07/01 -> 2025/07/01
+  const roc = str.match(/^(\d{3})[\/-\.](\d{1,2})[\/-\.](\d{1,2})/);
+  if (roc) {
+    const y = Number(roc[1]) + 1911;
+    return new Date(y, Number(roc[2]) - 1, Number(roc[3]));
+  }
+  const m = str.match(/^(\d{4})[\/-\.](\d{1,2})[\/-\.](\d{1,2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
 function initStickyControls(){
   const sentinel = document.getElementById('stickySentinel');
   const pane = document.getElementById('controlsCard');
@@ -995,8 +1023,8 @@ async function loadAllData() {
   // dedupe summary by date (keep last)
   const m = new Map();
   for (const r of sum) m.set(r.date, r);
-  state.summary = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
-  state.details = det.sort((a,b)=>a.date.localeCompare(b.date));
+  state.summary = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+  state.details = det.sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   state.dateMin = state.summary[0].date;
@@ -1045,7 +1073,7 @@ function buildSelectors() {
       wkMap.set(key, { start: key, end: toISO(e) });
     }
   }
-  state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>a.start.localeCompare(b.start));
+  state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>safeLocaleCompare(a.start,b.start));
 
   const renderMonthOptions = (year) => {
     const months = state.monthsByYear[year] || [];
@@ -1230,7 +1258,7 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     b.sum += (Number(r[metric]) || 0);
   }
 
-  let keys = Array.from(buckets.keys()).sort((a, b) => a.localeCompare(b));
+  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a,b));
 
   // 年別：固定顯示 1~12 月（即使某些月份無資料，也保留 x 軸刻度）
   if (gran === 'month' && state.mode === 'year' && hasRange) {
@@ -1680,7 +1708,7 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
   }
-  const daily = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
+  const daily = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   for (const o of daily) {
     o.price = o.priceN ? (o.priceSum / o.priceN) : null;
     o.prodRate = o.order>0 ? (o.output / o.order) : null;
