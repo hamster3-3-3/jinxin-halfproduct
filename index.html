@@ -376,6 +376,7 @@
                 <tr>
                   <th>商品名</th>
                   <th>半成品名</th>
+                  <th>上市日期</th>
                   <th class="text-right">補單</th>
                   <th class="text-right">實際生產率</th>
                   <th class="text-right">差異金額</th>
@@ -603,6 +604,163 @@ const parseISO = (s) => {
   if (isNaN(d)) return null;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 };
+
+
+/* =========================
+   上市日期（鮮食開發確認表）載入
+   - 以 GitHub Pages 同網域相對路徑讀取：./2025-2026鮮食開發確認表.xlsx
+   - 若放在 /data 也可：./data/2025-2026鮮食開發確認表.xlsx
+   - 以「商品名稱」對應「上市日期(D)」，並計算距今天數（以使用者裝置的「今日」為準）
+========================= */
+state.launch = { loaded:false, map:new Map(), source:null, updatedAt:null };
+
+const LAUNCH_XLSX_CANDIDATES = [
+  './2025-2026鮮食開發確認表.xlsx',
+  './data/2025-2026鮮食開發確認表.xlsx'
+];
+
+const normalizeProdKey = (s) => safeStr(s).replace(/[\s\u3000]+/g,'').trim();
+const stripParenText = (s) => safeStr(s)
+  .replace(/（[^）]*）/g,'')
+  .replace(/\([^)]*\)/g,'');
+
+
+function fmtYMD(d){
+  if (!(d instanceof Date) || isNaN(d)) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function daysBetween(a, b){
+  const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((db - da) / 86400000);
+}
+
+// 解析像「暫定11/15」「11/15」這種沒有年份的日期：用今年/去年擇近
+function parseLooseMD(v){
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  let s = String(v).trim();
+  if (!s) return null;
+  s = s.replace(/\s+/g,'').replace(/^暫定/,'');
+  const d1 = parseISO(s);
+  if (d1) return d1;
+
+  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})$/);
+  if (!m) return null;
+  const mm = Number(m[1]), dd = Number(m[2]);
+  if (!(mm>=1 && mm<=12 && dd>=1 && dd<=31)) return null;
+
+  const today = new Date();
+  const cands = [
+    new Date(today.getFullYear(), mm-1, dd),
+    new Date(today.getFullYear()-1, mm-1, dd)
+  ];
+  cands.sort((x,y) => Math.abs(today - x) - Math.abs(today - y));
+  const best = cands[0];
+  return new Date(best.getFullYear(), best.getMonth(), best.getDate());
+}
+
+function parseLaunchMapFromWB(wb){
+  const sn = wb.SheetNames?.[0];
+  const ws = sn ? wb.Sheets[sn] : null;
+  if (!ws) throw new Error('找不到工作表');
+  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+  if (!aoa || !aoa.length) throw new Error('工作表空白');
+
+  // 找表頭列：同時包含「上市日期」與「商品名稱/商品名」
+  let hRow = -1;
+  const scan = Math.min(aoa.length, 150);
+  for (let i=0; i<scan; i++){
+    const row = aoa[i] || [];
+    const rowStr = row.map(c => normalizeHeader(c)).join('|');
+    if (rowStr.includes('上市日期') && (rowStr.includes('商品名稱') || rowStr.includes('商品名') || rowStr.includes('品名'))){
+      hRow = i; break;
+    }
+  }
+  if (hRow < 0) throw new Error('找不到表頭列（上市日期/商品名稱）');
+
+  const header = aoa[hRow] || [];
+  let colDate = null;
+  let colProd = null;
+
+  for (let j=0; j<header.length; j++){
+    const h = normalizeHeader(header[j]);
+    if (!h) continue;
+    if (colDate == null && h.includes('上市日期')) colDate = j;
+    if (colProd == null && (h.includes('商品名稱') || h === '商品名' || h === '品名' || (h.includes('商品') && h.includes('名稱')))) colProd = j;
+  }
+  if (colDate == null || colProd == null) throw new Error('找不到上市日期或商品名稱欄位');
+
+  const map = new Map(); // key -> {date, ymd}
+  for (let i=hRow+1; i<aoa.length; i++){
+    const row = aoa[i] || [];
+    const prodRaw = toStr(row[colProd]).trim();
+    if (!prodRaw) continue;
+
+    const key1 = normalizeProdKey(prodRaw);
+    const key2 = normalizeProdKey(stripParenText(prodRaw));
+    if (!key1 && !key2) continue;
+
+    let dt = parseISO(row[colDate]);
+    if (!dt) dt = parseLooseMD(row[colDate]);
+    if (!dt) continue;
+
+    const ymd = fmtYMD(dt);
+    if (!ymd) continue;
+
+    const put = (k) => {
+      if (!k) return;
+      const prev = map.get(k);
+      if (!prev || prev.ymd < ymd) map.set(k, {date: dt, ymd});
+    };
+    put(key1);
+    if (key2 !== key1) put(key2);
+  }
+  return map;
+}
+
+async function tryLoadLaunchMap(){
+  // reset
+  state.launch.loaded = false;
+  state.launch.map = new Map();
+  state.launch.source = null;
+
+  let lastErr = null;
+  for (const url of LAUNCH_XLSX_CANDIDATES){
+    try{
+      const r = await fetch(url, {cache:'no-store'});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const ab = await r.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array', cellDates:true});
+      const mp = parseLaunchMapFromWB(wb);
+      state.launch.map = mp;
+      state.launch.loaded = true;
+      state.launch.source = url;
+      state.launch.updatedAt = new Date();
+      return true;
+    } catch(e){
+      lastErr = e;
+    }
+  }
+  console.warn('上市日期表讀取失敗', lastErr);
+  return false;
+}
+
+function getLaunchCellHTML(productName){
+  const key1 = normalizeProdKey(productName);
+  const key2 = normalizeProdKey(stripParenText(productName));
+  let info = (key1 ? state.launch?.map?.get(key1) : null) || (key2 ? state.launch?.map?.get(key2) : null);
+  if (!info || !(info.date instanceof Date)) return '—';
+  const today = new Date();
+  const d = daysBetween(info.date, today);
+  const label = d >= 0 ? `距今 ${d} 天` : `尚有 ${Math.abs(d)} 天`;
+  return `<div class="mono">${info.ymd}</div><div class="text-xs muted">${label}</div>`;
+}
+
 
 // Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
 const weekStartTue = (d) => {
@@ -1066,6 +1224,9 @@ async function loadAllData() {
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
+  // Optional: load 上市日期表（鮮食開發確認表.xlsx）
+  const launchPromise = tryLoadLaunchMap();
+
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
 
@@ -1090,6 +1251,9 @@ async function loadAllData() {
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   state.dateMin = state.summary[0].date;
   state.dateMax = state.summary[state.summary.length-1].date;
+
+  // 等待上市日期表（不影響主資料載入）
+  try { await launchPromise; } catch(_) {}
 
   $('dataStatus').textContent = '已載入 ' + files.length + ' 份檔案';
 }
@@ -1658,6 +1822,7 @@ function applyGroupFilterAndRender(drows) {
     tr.innerHTML = `
       <td>${r.product}</td>
       <td class="muted">${r.semi}</td>
+      <td class="mono">${getLaunchCellHTML(r.product)}</td>
       <td class="text-right mono">${fmtInt(r.refillQty)}</td>
       <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
       <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
