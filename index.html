@@ -529,6 +529,52 @@ const toISO = (d) => {
   const dd = String(z.getDate()).padStart(2,'0');
   return `${yyyy}-${mm}-${dd}`;
 };
+
+/** Parse date-like value into Date.
+ * Supports: 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYY/MM/DD' (ROC), 'YYY.MM.DD', Excel serial, Date.
+ */
+const parseISO = (s) => {
+  if (s == null || s === '') return null;
+  if (s instanceof Date) return new Date(s.getFullYear(), s.getMonth(), s.getDate());
+  if (typeof s === 'number' && isFinite(s)) {
+    // Excel serial date (days since 1899-12-30)
+    const ms = Math.round((s - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  let t = String(s).trim();
+  if (!t) return null;
+  t = t.replace(/\./g, '/');
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(t)) {
+    const [y,m,d] = t.split(/[-\/]/).map(v => parseInt(v, 10));
+    return new Date(y, m-1, d);
+  }
+  // ROC YYY/MM/DD or ROC YYY-MM-DD
+  if (/^\d{3}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(t)) {
+    const [y,m,d] = t.split(/[-\/]/).map(v => parseInt(v, 10));
+    return new Date(y + 1911, m-1, d);
+  }
+  // YYYY-MM (month)
+  if (/^\d{4}-\d{2}$/.test(t)) {
+    const [y,m] = t.split('-').map(v => parseInt(v,10));
+    return new Date(y, m-1, 1);
+  }
+  // Fallback
+  const d = new Date(t);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+// Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
+const weekStartTue = (d) => {
+  const z = new Date(d);
+  const wd = z.getDay(); // 0=Sun ... 2=Tue
+  const diff = (wd - 2 + 7) % 7;
+  return new Date(z.getFullYear(), z.getMonth(), z.getDate() - diff);
+};
+
 const parseMaybeDate = (v) => {
   if (!v) return null;
   if (v instanceof Date && !isNaN(v)) return v;
