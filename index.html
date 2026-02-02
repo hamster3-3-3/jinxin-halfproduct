@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>晉欣鮮食廠｜半成品儀表板</title>
+  <link rel="icon" href="data:," />
 
   <!-- Tailwind CSS (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -141,7 +142,10 @@
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+  .sticky-pane{position:sticky;top:12px;z-index:40;}
+.sticky-pane.is-stuck{box-shadow:0 12px 30px rgba(15,23,42,.12);}
+@media (max-width:640px){.sticky-pane{top:8px;}}
+</style>
 
   <!-- Local vendor scripts (GitHub Pages 同網域) -->
   <script src="./xlsx.full.min.js"></script>
@@ -154,7 +158,6 @@
     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">晉欣鮮食廠｜半成品儀表板</h1>
-        <div class="text-sm muted mt-1">資料來源：晉欣半成品報廢管理表（XLSX）｜本頁更新：2026-01-26 05:49</div>
       </div>
       <div class="flex flex-wrap gap-2 items-center">
         <span id="dataStatus" class="chip">尚未載入資料</span>
@@ -163,10 +166,11 @@
     </div>
 
     <!-- Controls -->
-    <div class="mt-4 card p-4">
+    <div id="stickySentinel" class="h-px"></div>
+    <div id="controlsCard" class="mt-4 card p-4 sticky-pane">
       <div class="flex flex-col gap-4">
         <div class="flex flex-wrap items-center gap-2">
-          <div class="text-sm font-semibold mr-2">1) 選擇時間範圍</div>
+          <div class="text-sm font-semibold mr-2">選擇時間範圍</div>
           <button class="seg-btn active" data-mode="year">年別</button>
           <button class="seg-btn" data-mode="month">月別</button>
           <button class="seg-btn" data-mode="week">週別</button>
@@ -176,7 +180,7 @@
 
         <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
           <div class="md:col-span-3" id="yearWrap">
-            <label class="text-xs muted">年別</label>
+            <label class="text-xs muted">年別（目前內建為 2025 / 2026）</label>
             <select id="yearSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
           </div>
 
@@ -186,7 +190,7 @@
           </div>
 
           <div class="md:col-span-4 hidden" id="weekWrap">
-            <label class="text-xs muted">週別（週二～週一）</label>
+            <label class="text-xs muted">週別（週二至週一）</label>
             <select id="weekSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white"></select>
           </div>
 
@@ -202,27 +206,10 @@
               <input id="rangeEnd" type="date" class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" />
             </div>
           </div>
-
-          <div class="md:col-span-2">
-            <label class="text-xs muted">顯示粒度</label>
-            <select id="granSel" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white">
-              <option value="auto">自動</option>
-              <option value="day">日</option>
-              <option value="week">週</option>
-              <option value="month">月</option>
-            </select>
-          </div>
-
           <div class="md:col-span-3 flex gap-2">
             <button id="applyBtn" class="seg-btn w-full">套用</button>
             <button id="todayBtn" class="seg-btn w-full">跳到最新日</button>
           </div>
-        </div>
-
-        <div class="flex flex-wrap gap-2 items-center">
-          <span id="rangeLabel" class="chip">—</span>
-          <span id="fileLabel" class="chip">—</span>
-          <span id="detailLabel" class="chip">—</span>
         </div>
       </div>
     </div>
@@ -232,28 +219,23 @@
       <div class="card p-4">
         <div class="kpi-card-title">營業額（平均/日）</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiSalesSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">報廢額（平均/日）</div>
         <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiScrapAmtSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">報廢率（平均）</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiScrapRateSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">超用額（平均/日）</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiOverAmtSub" class="subval mt-1">—</div>
-      </div>
+</div>
       <div class="card p-4">
         <div class="kpi-card-title">超用率（平均）</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
-        <div id="kpiOverRateSub" class="subval mt-1">—</div>
-      </div>
+</div>
     </div>
 
     <!-- Top cards -->
@@ -265,7 +247,7 @@
             <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1">構成比（平均）：<span id="topScrapShare" class="mono">—</span></div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
 
@@ -276,7 +258,7 @@
             <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1">構成比（平均）：<span id="topOverShare" class="mono">—</span></div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
 
@@ -290,7 +272,7 @@
               <span id="sharedBadge" class="hidden"></span>
             </div>
           </div>
-          <div class="chip">2) 卡片框</div>
+          
         </div>
       </div>
     </div>
@@ -300,36 +282,44 @@
       <div class="card p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">4) KPI 趨勢圖（最多選 2 個指標）</div>
-            <div class="text-xs muted mt-1">同時支援金額與比率（雙座標）。</div>
+            <div class="text-sm font-semibold">KPI 趨勢圖</div>
+            
           </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="sales">營業額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapAmt">報廢額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="scrapRate">報廢率</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseAmt">超用額</label>
-            <label class="chip"><input class="mr-1" type="checkbox" data-kpi="overuseRate">超用率</label>
+          
+          <div class="flex flex-wrap gap-2 items-center" id="kpiSingleWrap">
+            <button class="seg-btn active" type="button" data-kpi-single="sales">營業額</button>
+            <button class="seg-btn" type="button" data-kpi-single="scrapAmt">報廢額</button>
+            <button class="seg-btn" type="button" data-kpi-single="scrapRate">報廢率</button>
+            <button class="seg-btn" type="button" data-kpi-single="overuseAmt">超用額</button>
+            <button class="seg-btn" type="button" data-kpi-single="overuseRate">超用率</button>
           </div>
         </div>
         <div class="mt-3">
-          <canvas id="kpiChart" height="140"></canvas>
+          <canvas id="kpiChart" height="220"></canvas>
         </div>
       </div>
 
       <div class="card p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">5) 廢棄／超用 趨勢圖（雙指標線）</div>
-            <div class="text-xs muted mt-1">金額總計（平均/日）＋構成比（平均）。</div>
+            <div class="text-sm font-semibold">廢棄／超用 趨勢圖</div>
+            
           </div>
           <div class="flex flex-wrap gap-2 items-center">
-            <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
-            <button class="seg-btn" data-right="overTop10">超用前10名</button>
-            <button class="seg-btn" data-right="shared">共用類廢棄</button>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
+              <button class="seg-btn" data-right="overTop10">超用前10名</button>
+              <button class="seg-btn" data-right="shared">共用類廢棄</button>
+            </div>
+            <div class="h-6 w-px bg-slate-200 mx-1"></div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button class="seg-btn active" data-right-metric="amt">金額</button>
+              <button class="seg-btn" data-right-metric="share">構成比</button>
+            </div>
           </div>
         </div>
         <div class="mt-3">
-          <canvas id="rightChart" height="140"></canvas>
+          <canvas id="rightChart" height="220"></canvas>
         </div>
       </div>
     </div>
@@ -339,9 +329,8 @@
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">6) 半成品展開</div>
-            <div class="text-xs muted mt-1">排序、搜尋後可點擊列查看趨勢圖與日別明細。</div>
-          </div>
+            <div class="text-sm font-semibold">半成品展開</div>
+</div>
           <div class="flex flex-wrap gap-2 items-center">
             <div class="text-xs muted">排序依據</div>
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
@@ -356,12 +345,12 @@
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
           <div class="lg:col-span-5">
             <label class="text-xs muted">品名搜尋（輸入關鍵字）</label>
-            <input id="productSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：握便當 / 雞胸 / 義大利麵…" />
+            <input id="productSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="" />
             <div id="productSuggest" class="mt-1 hidden"></div>
           </div>
           <div class="lg:col-span-5">
             <label class="text-xs muted">半成品名搜尋（輸入關鍵字）</label>
-            <input id="semiSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="例如：飯 / 麵 / 醬 / 配菜…" />
+            <input id="semiSearch" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 bg-white" placeholder="" />
             <div id="semiSuggest" class="mt-1 hidden"></div>
           </div>
           <div class="lg:col-span-2 flex gap-2">
@@ -372,10 +361,7 @@
         <div class="table-wrap">
           <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs muted flex flex-wrap items-center justify-between gap-2">
             <div>顯示：<span id="groupCount">0</span> 筆（最多 200 筆）</div>
-            <div class="flex items-center gap-2">
-              <span class="chip">點擊列可查看趨勢＆明細</span>
-            </div>
-          </div>
+</div>
           <div class="overflow-auto max-h-[420px]">
             <table>
               <thead>
@@ -402,17 +388,17 @@
                 <div class="text-sm font-semibold">商品趨勢圖與日別明細</div>
                 <div id="itemTitle" class="text-xs muted mt-1">—</div>
               </div>
-              <div class="flex flex-wrap gap-2 items-center">
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="prodRate">實際生產率</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="diffAmt">差異金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="scrapAmt">報廢金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="overuseAmt">超用金額</label>
-                <label class="chip"><input class="mr-1" type="checkbox" data-item="refillQty">補單量</label>
+              <div class="flex flex-wrap gap-2 items-center" id="itemMetricWrap">
+                <button class="seg-btn" type="button" data-item-single="prodRate">實際生產率</button>
+                <button class="seg-btn active" type="button" data-item-single="diffAmt">差異金額</button>
+                <button class="seg-btn" type="button" data-item-single="scrapAmt">報廢金額</button>
+                <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
+                <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
               </div>
             </div>
 
             <div class="card p-3">
-              <canvas id="itemChart" height="160"></canvas>
+              <canvas id="itemChart" height="240"></canvas>
             </div>
 
             <div class="table-wrap">
@@ -451,10 +437,6 @@
 
       </div>
     </div>
-
-    <div class="mt-6 text-xs muted">
-      備註：本頁使用「日別報廢率總表」計算 KPI／前10名／共用類廢棄；「各日合計」頁籤用於半成品明細展開。
-    </div>
   </div>
 
   <div id="toast" class="toast"></div>
@@ -485,8 +467,10 @@ const state = {
     start: null,
     end: null
   },
-  kpiSelected: ['sales','scrapAmt'],
+  kpiSelected: ['sales'],
+  itemMetricSelected: 'diffAmt',
   rightMode: 'scrapTop10',
+  rightMetric: 'amt',
   groupRows: [],
   filteredGroups: [],
   selectedKey: null,
@@ -507,6 +491,26 @@ const toast = (msg) => {
   el._t = setTimeout(() => el.style.display = 'none', 3000);
 };
 
+
+// --- date/string helpers (避免 null.localeCompare、parseISO 未定義而中斷) ---
+function safeStr(x){ return (x===null || x===undefined) ? '' : String(x); }
+function safeLocaleCompare(a,b){ return safeStr(a).localeCompare(safeStr(b)); }
+
+
+function initStickyControls(){
+  const sentinel = document.getElementById('stickySentinel');
+  const pane = document.getElementById('controlsCard');
+  if (!sentinel || !pane) return;
+  // IntersectionObserver: 當 sentinel 捲出視窗上緣 => pane 進入「凍結」狀態
+  const obs = new IntersectionObserver((entries)=>{
+    const ent = entries[0];
+    // 當 sentinel 不可見（被捲走）代表已開始 stick
+    if (!ent.isIntersecting) pane.classList.add('is-stuck');
+    else pane.classList.remove('is-stuck');
+  }, {root:null, threshold:0});
+  obs.observe(sentinel);
+}
+
 const fmtInt = (n) => (Number.isFinite(n) ? n.toLocaleString('zh-TW') : '—');
 const fmtMoney = (n) => {
   if (!Number.isFinite(n)) return '—';
@@ -517,6 +521,13 @@ const fmtPct = (n) => {
   if (!Number.isFinite(n)) return '—';
   return (n * 100).toFixed(2) + '%';
 };
+const shortLabel = (s) => {
+  if (typeof s !== 'string') return String(s ?? '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(5); // MM-DD
+  if (/^\d{4}-\d{2}$/.test(s)) return s.slice(5);       // MM
+  return s;
+};
+
 const toISO = (d) => {
   const z = new Date(d);
   const yyyy = z.getFullYear();
@@ -524,6 +535,52 @@ const toISO = (d) => {
   const dd = String(z.getDate()).padStart(2,'0');
   return `${yyyy}-${mm}-${dd}`;
 };
+
+/** Parse date-like value into Date.
+ * Supports: 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYY/MM/DD' (ROC), 'YYY.MM.DD', Excel serial, Date.
+ */
+const parseISO = (s) => {
+  if (s == null || s === '') return null;
+  if (s instanceof Date) return new Date(s.getFullYear(), s.getMonth(), s.getDate());
+  if (typeof s === 'number' && isFinite(s)) {
+    // Excel serial date (days since 1899-12-30)
+    const ms = Math.round((s - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  let t = String(s).trim();
+  if (!t) return null;
+  t = t.replace(/\./g, '/');
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(t)) {
+    const [y,m,d] = t.split(/[-\/]/).map(v => parseInt(v, 10));
+    return new Date(y, m-1, d);
+  }
+  // ROC YYY/MM/DD or ROC YYY-MM-DD
+  if (/^\d{3}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(t)) {
+    const [y,m,d] = t.split(/[-\/]/).map(v => parseInt(v, 10));
+    return new Date(y + 1911, m-1, d);
+  }
+  // YYYY-MM (month)
+  if (/^\d{4}-\d{2}$/.test(t)) {
+    const [y,m] = t.split('-').map(v => parseInt(v,10));
+    return new Date(y, m-1, 1);
+  }
+  // Fallback
+  const d = new Date(t);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+// Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
+const weekStartTue = (d) => {
+  const z = new Date(d);
+  const wd = z.getDay(); // 0=Sun ... 2=Tue
+  const diff = (wd - 2 + 7) % 7;
+  return new Date(z.getFullYear(), z.getMonth(), z.getDate() - diff);
+};
+
 const parseMaybeDate = (v) => {
   if (!v) return null;
   if (v instanceof Date && !isNaN(v)) return v;
@@ -608,41 +665,87 @@ function findSheetName(wb, keyword) {
   return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
 }
 
-function parseSummaryFromWB(wb) {
+
+// Parse file start date from filename like "2025-1101-1131晉欣半成品報廢管理表.xlsx"
+function parseFileStartFromName(fileName) {
+  if (!fileName) return null;
+  const m = String(fileName).match(/(\d{4})-(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null;
+  return new Date(y, mm - 1, dd);
+}
+function ymToIndex(ym) {
+  const m = String(ym).match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  return y * 12 + mo; // mo: 1-12
+}
+function shiftISOByMonths(iso, deltaMonths) {
+  const d = parseMaybeDate(iso);
+  if (!d) return iso;
+  d.setMonth(d.getMonth() + deltaMonths);
+  return toISO(d);
+}
+
+
+function parseSummaryFromWB(wb, fileName) {
   const sname = wb.SheetNames.find(n => n.replace(/\s+/g,'').includes('日別報廢率總表')) || null;
   if (!sname) return [];
   const ws = wb.Sheets[sname];
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
   if (!rows || !rows.length) return [];
 
-  // header row contains "日期"
+  // 找到 header row：包含「日期」
   let hRow = -1;
   for (let i=0;i<rows.length;i++) {
-    if (normalizeHeader(rows[i][0]).includes('日期')) { hRow = i; break; }
+    const r = (rows[i] || []).map(normalizeHeader);
+    if (r.some(x => x === '日期' || x.includes('日期'))) { hRow = i; break; }
   }
   if (hRow < 0) return [];
 
-  const header = rows[hRow].map(normalizeHeader);
-  const col = (name) => header.findIndex(h => h===name);
-  const idxDate = 0;
+  const header = (rows[hRow] || []).map(normalizeHeader);
+  const sub = (rows[hRow+1] || []).map(normalizeHeader);
 
-  const idxSales = header.findIndex(h => h.includes('營業額'));
-  const idxScrapAmt = header.findIndex(h => h.includes('報廢金額'));
-  const idxScrapRate = header.findIndex(h => h.includes('報廢率'));
-  const idxOverAmt = header.findIndex(h => h.includes('超用金額'));
-  const idxOverRate = header.findIndex(h => h.includes('超用率'));
-  const idxTopScrapAmt = header.findIndex(h => h.includes('廢棄前10名金額總計'));
-  const idxTopScrapShare = header.findIndex(h => h.includes('廢棄前10名構成比'));
-  const idxTopOverAmt = header.findIndex(h => h.includes('超用前10名金額總計'));
-  const idxTopOverShare = header.findIndex(h => h.includes('超用前10名構成比'));
-  const idxSharedAmt = header.findIndex(h => h.includes('共用類廢棄金額總計'));
-  const idxSharedShare = header.findIndex(h => h.includes('共用類廢棄構成比'));
+  const findIdx = (predicate) => header.findIndex(predicate);
+
+  const idxDate = findIdx(h => h === '日期' || h.includes('日期'));
+  const idxSales = findIdx(h => h.includes('營業額'));
+
+  // 報廢額 / 超用額：避免誤抓「率」
+  const idxScrapAmt = findIdx(h => h.includes('報廢') && !h.includes('率') && (h.includes('額') || h.includes('金額')));
+  const idxScrapRate = findIdx(h => h.includes('報廢率'));
+  const idxOverAmt = findIdx(h => h.includes('超用') && !h.includes('率') && (h.includes('額') || h.includes('金額')));
+  const idxOverRate = findIdx(h => h.includes('超用率'));
+
+  // 多層表頭（廢棄前10名 / 超用前10名 / 共用類廢棄）：
+  // header 可能只有第一欄有群組名，第二欄為空；因此用「當欄或前一欄」判斷群組歸屬
+  const groupAt = (i) => (header[i] || header[i-1] || '');
+  const findGroupSub = (groupKw, subKw) => {
+    for (let i=0;i<Math.max(header.length, sub.length);i++) {
+      const g = groupAt(i);
+      const s = sub[i] || '';
+      if (g.includes(groupKw) && s.includes(subKw)) return i;
+    }
+    return -1;
+  };
+
+  const idxTopScrapAmt = findGroupSub('廢棄前10名', '金額總計');
+  const idxTopScrapShare = findGroupSub('廢棄前10名', '構成比');
+  const idxTopOverAmt = findGroupSub('超用前10名', '金額總計');
+  const idxTopOverShare = findGroupSub('超用前10名', '構成比');
+  const idxSharedAmt = findGroupSub('共用類廢棄', '金額總計');
+  const idxSharedShare = findGroupSub('共用類廢棄', '構成比');
 
   const out = [];
-  for (let r=hRow+1;r<rows.length;r++) {
+  for (let r=hRow+2;r<rows.length;r++) { // hRow+1 為子表頭
     const row = rows[r];
     const d = parseMaybeDate(row[idxDate]);
     if (!d) continue;
+
     out.push({
       date: toISO(d),
       sales: Number(row[idxSales] ?? 0) || 0,
@@ -658,154 +761,213 @@ function parseSummaryFromWB(wb) {
       sharedShare: Number(row[idxSharedShare] ?? 0) || 0,
     });
   }
+  
+  // 有些檔案的「日別報廢率總表」日期欄可能仍保留上月快取（例如 11 月檔案顯示 10 月日期）
+  // 以檔名的起始年月作為參照，若主體年月不一致，則整體平移月份，避免月份缺漏（例如缺少 11 月）。
+  const fileStart = parseFileStartFromName(fileName);
+  if (fileStart && out.length) {
+    const expYM = toISO(fileStart).slice(0,7);
+    const counts = new Map();
+    for (const r of out) {
+      const ym = String(r.date).slice(0,7);
+      counts.set(ym, (counts.get(ym) || 0) + 1);
+    }
+    let domYM = null, domN = 0;
+    for (const [k, v] of counts.entries()) {
+      if (v > domN) { domN = v; domYM = k; }
+    }
+    const a = ymToIndex(domYM);
+    const b = ymToIndex(expYM);
+    if (a != null && b != null && domYM && expYM && domYM !== expYM) {
+      const delta = b - a;
+      // 僅在差距合理（±2 個月）時才平移，避免誤判
+      if (Math.abs(delta) <= 2) {
+        for (const r of out) r.date = shiftISOByMonths(r.date, delta);
+      }
+    }
+  }
+
   return out;
 }
 
-function parseDetailsFromWB(wb){
-    const out=[];
-    const sheetNames = wb.SheetNames || [];
-    const toStr = (v)=> (v==null ? '' : String(v)).trim();
-    const normKey = (s)=> toStr(s).replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')');
+function parseDetailsFromWB(wb, fileNameOrMeta) {
+  const out = [];
 
-    const excelSerialToUTCDate = (n)=>{
-      if(typeof n!=='number' || !isFinite(n)) return null;
-      if(!XLSX || !XLSX.SSF || !XLSX.SSF.parse_date_code) return null;
-      const o = XLSX.SSF.parse_date_code(n);
-      if(!o || !o.y || !o.m || !o.d) return null;
-      const ms = Date.UTC(o.y, o.m-1, o.d, o.H||0, o.M||0, o.S||0);
-      const d = new Date(ms);
-      return isNaN(d) ? null : d;
-    };
+  // 由檔名推估年份（2025-0701... 或 114.07...）
+  const yearHint = (() => {
+    const s = (typeof fileNameOrMeta === 'string' ? fileNameOrMeta : (fileNameOrMeta && fileNameOrMeta.name)) || '';
+    const m1 = String(s).match(/(20\d{2})/);
+    if (m1) return +m1[1];
+    const m2 = String(s).match(/(^|[^\d])(\d{3})[.\-/]/); // 民國 3 碼年
+    if (m2) return +m2[2] + 1911;
+    return null;
+  })();
 
-    const parseMaybeDate = (v)=>{
-      if(v==null || v==='') return null;
-      if(v instanceof Date && !isNaN(v)) return v;
-      if(typeof v === 'number') return excelSerialToUTCDate(v);
-      const s = toStr(v);
-      const m = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
-      if(m){
-        const y=+m[1], mo=+m[2], d=+m[3];
-        const dt = new Date(Date.UTC(y, mo-1, d));
-        return isNaN(dt) ? null : dt;
-      }
-      return null;
-    };
 
-    const num = (v)=>{
-      if(v==null || v==='') return 0;
-      if(typeof v === 'number') return isFinite(v) ? v : 0;
-      const s = toStr(v).replace(/,/g,'');
-      const n = parseFloat(s);
-      return isFinite(n) ? n : 0;
-    };
+  // 兼容多版本明細分頁命名：
+  // 1) 合計MMDD / 合計MM/DD
+  // 2) 01-30合計 / 01-31合計 / 01-27合計 / 01-13合計（各月份彙整明細）
+  // 3) 其他含「合計」但非「日別報廢率總表」的分頁（仍會再靠欄位表頭判斷）
+  const sheets = wb.SheetNames.filter((name) => {
+    const t = String(name || '').trim();
+    const compact = t.replace(/\s+/g, '');
+    if (!compact) return false;
+    if (compact.includes('日別報廢率總表')) return false;
+    // 明細類
+    if (/^合計(\d{2,4})([\/-]?\d{2})?$/i.test(compact)) return true;        // 合計MMDD 或 合計MM/DD
+    if (/^\d{2}-\d{2}合計$/i.test(compact)) return true;                    // 01-30合計
+    if (compact.includes('合計')) return true;
+    return false;
+  });
 
-    const pickSheetDate = (rows)=>{
-      // scan top-left cells for a full yyyy-mm-dd date
-      for(let r=0;r<Math.min(3, rows.length); r++){
-        const row = rows[r] || [];
-        for(let c=0;c<Math.min(6, row.length); c++){
-          const d = parseMaybeDate(row[c]);
-          if(d) return d;
-        }
-      }
-      return null;
-    };
+  const toStr = (v) => (v == null ? '' : String(v).trim());
 
-    for (const name of sheetNames){
-      if(!String(name).includes('合計')) continue;
-      // ignore summary KPI sheet
-      if(String(name).replace(/\s+/g,'').includes('日別報廢率總表')) continue;
+  const normKey = (s) => toStr(s).replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')');
 
-      const ws = wb.Sheets[name];
-      if(!ws) continue;
+  const findCol = (hdr, keys) => {
+    const h = hdr.map(normKey);
+    for (const k of keys) {
+      const kk = normKey(k);
+      const idx = h.findIndex(x => x === kk || x.includes(kk));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  };
 
-      const rows = XLSX.utils.sheet_to_json(ws,{header:1, defval:null, blankrows:false});
-      if(!rows || !rows.length) continue;
+  const parseDate = (v) => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') {
+      // Excel date serial (1900 system)
+      const d = XLSX.SSF.parse_date_code(v);
+      if (d && d.y && d.m && d.d) return new Date(d.y, d.m - 1, d.d);
+    }
+    const s = toStr(v);
+    // 支援 2025-07-01 / 2025/07/01 / 07-01 / 7/1 / 114/07/01
+    let m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    m = s.match(/^(\d{3})[\/-](\d{1,2})[\/-](\d{1,2})/); // 民國年
+    if (m) return new Date(+m[1] + 1911, +m[2] - 1, +m[3]);
+    m = s.match(/^(\d{1,2})[\/-](\d{1,2})$/);
+    if (m) {
+      // 若只有月日，先用當前所選年補上（後續再用 filter 時比對）
+      const yy = (yearHint || new Date().getFullYear());
+      return new Date(+yy, +m[1] - 1, +m[2]);
+    }
+    return null;
+  };
 
-      // find header row that contains 商品名稱/商品名 and 半成品名稱/半成品
-      let headerRow=-1;
-      for(let i=0;i<Math.min(60, rows.length); i++){
-        const r = rows[i] || [];
-        const joined = r.map(normKey).join('');
-        if((joined.includes('商品名稱')||joined.includes('商品名')||joined.includes('品名')) &&
-           (joined.includes('半成品名稱')||joined.includes('半成品名')||joined.includes('半成品'))){
-          headerRow=i; break;
-        }
-      }
-      if(headerRow<0) continue;
+  // 逐 sheet 解析
+  for (const sn of sheets) {
+    const ws = wb.Sheets[sn];
+    if (!ws) continue;
 
-      const header = rows[headerRow] || [];
-      const idx = (...keys)=>{
-        const h = header.map(normKey);
-        for(const k of keys){
-          const kk = normKey(k);
-          if(!kk) continue;
-          for(let i=0;i<h.length;i++){
-            if(h[i]===kk || h[i].includes(kk)) return i;
-          }
-        }
-        return -1;
-      };
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    if (!rows || rows.length === 0) continue;
 
-      const sheetDate = pickSheetDate(rows);
-
-      // date column: try explicit header first; then fallback if col0 looks like a date
-      let iDate = idx('日期','生產日','日別','生產日期');
-      if(iDate<0){
-        const firstData = rows[headerRow+1] || [];
-        const d0 = parseMaybeDate(firstData[0]);
-        if(d0) iDate = 0;
-      }
-
-      const iProd = idx('商品名稱','商品名','品名');
-      const iSemi = idx('半成品名稱','半成品名','半成品');
-      const iOrder = idx('訂單量','訂單需求','訂單數','需求量');
-      const iActual = idx('出料量','實際出料','實際產出','實際生產量','生產量');
-      const iTotal = idx('合計','合計量','總量');
-      const iRefill = idx('補單量','補單');
-      const iDiffQty = idx('差異量','差異');
-      const iDiffAmt = idx('差異量(金額)','差異金額','差異額','差異(元)');
-      const iScrapQty = idx('報廢量','廢棄量','報廢');
-      const iScrapAmt = idx('報廢金額','報廢量(金額)','報廢額','廢棄金額','廢棄量(金額)','廢棄額');
-      const iOverQty = idx('超用量','超用');
-      const iOverAmt = idx('超用金額','超用額');
-      const iUnit = idx('單位');
-
-      for(let r=headerRow+1; r<rows.length; r++){
-        const row = rows[r] || [];
-        const prod = toStr(row[iProd]);
-        const semi = toStr(row[iSemi]);
-        if(!prod && !semi) continue;
-
-        let d = null;
-        if(iDate>=0) d = parseMaybeDate(row[iDate]);
-        if(!d) d = sheetDate;
-        if(!d) continue;
-
-        const dateISO = d.toISOString().slice(0,10);
-
-        out.push({
-          date: dateISO,
-          product: prod,
-          semi: semi,
-          unit: toStr(row[iUnit]) || '',
-          orderQty: num(row[iOrder]),
-          actualQty: num(row[iActual]),
-          totalQty: num(row[iTotal]),
-          refillQty: num(row[iRefill]),
-          diffQty: num(row[iDiffQty]),
-          diffAmt: num(row[iDiffAmt]),
-          scrapQty: num(row[iScrapQty]),
-          scrapAmt: num(row[iScrapAmt]),
-          overQty: num(row[iOverQty]),
-          overAmt: num(row[iOverAmt]),
-        });
+    // 尋找表頭列（前 40 列內）
+    let headerRow = -1;
+    for (let r = 0; r < Math.min(40, rows.length); r++) {
+      const row = rows[r] || [];
+      const joined = row.map(normKey).join('|');
+      if (
+        (joined.includes('商品名稱') || joined.includes('商品名')) &&
+        (joined.includes('半成品名稱') || joined.includes('半成品名') || joined.includes('半成品'))
+      ) {
+        headerRow = r;
+        break;
       }
     }
+    if (headerRow < 0) continue;
 
-    return out;
+    const hdr = (rows[headerRow] || []).map(toStr);
+
+    const idxDate = (() => {
+      let i = findCol(hdr, ['日期', '生產日', '日別', '生產日期']);
+      if (i >= 0) return i;
+      // fallback：找最像日期的欄（前 5 欄）
+      for (let c = 0; c < Math.min(5, hdr.length); c++) {
+        const d = parseDate((rows[headerRow + 1] || [])[c]);
+        if (d) return c;
+      }
+      return -1;
+    })();
+
+    const idxProd = findCol(hdr, ['商品名稱', '商品名']);
+    const idxSemi = findCol(hdr, ['半成品名稱', '半成品名', '半成品']);
+    if (idxProd < 0 || idxSemi < 0) continue;
+
+    const idxOrder = findCol(hdr, ['訂單需求', '訂單量', '訂單數量', '訂單']);
+    const idxOut = findCol(hdr, ['實際產出', '出料量', '實際出料量', '實際產量', '產出量']);
+    const idxRefill = findCol(hdr, ['補單量', '補單']);
+    const idxPrice = findCol(hdr, ['單價', '價格']);
+    const idxDiffQty = findCol(hdr, ['差異量', '差異數量']);
+    const idxDiffAmt = findCol(hdr, ['差異金額', '差異量(金額)', '差異(元)', '差異額']);
+    const idxScrapQty = findCol(hdr, ['報廢量', '廢棄量']);
+    const idxScrapAmt = findCol(hdr, ['報廢金額', '廢棄金額', '報廢額', '廢棄額']);
+    const idxOverQty = findCol(hdr, ['超用量']);
+    const idxOverAmt = findCol(hdr, ['超用金額', '超用額']);
+
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const prod = toStr(row[idxProd]);
+      const semi = toStr(row[idxSemi]);
+      if (!prod && !semi) continue;
+
+      // 日期：沒有日期欄位也允許（某些「01-30合計」可能只做彙總），先記 null
+      const dateObj = idxDate >= 0 ? parseDate(row[idxDate]) : null;
+
+      const num = (v) => {
+        if (v == null || v === '') return null;
+        if (typeof v === 'number') return v;
+        const s = String(v).replace(/,/g, '').trim();
+        if (!s) return null;
+        const x = Number(s);
+        return Number.isFinite(x) ? x : null;
+      };
+
+      const order = idxOrder >= 0 ? (num(row[idxOrder]) ?? 0) : 0;
+      const outQty = idxOut >= 0 ? (num(row[idxOut]) ?? 0) : 0;
+      const refill = idxRefill >= 0 ? (num(row[idxRefill]) ?? 0) : 0;
+      const price = idxPrice >= 0 ? (num(row[idxPrice]) ?? null) : null;
+
+      const diffQty = idxDiffQty >= 0 ? (num(row[idxDiffQty]) ?? null) : null;
+      const diffAmt = idxDiffAmt >= 0 ? (num(row[idxDiffAmt]) ?? null) : null;
+      const scrapQty = idxScrapQty >= 0 ? (num(row[idxScrapQty]) ?? null) : null;
+      const scrapAmt = idxScrapAmt >= 0 ? (num(row[idxScrapAmt]) ?? null) : null;
+      const overuseQty = idxOverQty >= 0 ? (num(row[idxOverQty]) ?? null) : null;
+      const overuseAmt = idxOverAmt >= 0 ? (num(row[idxOverAmt]) ?? null) : null;
+
+      out.push({
+        date: dateObj ? toISO(dateObj) : null,
+        product: prod,
+        semi,
+        order,
+        output: outQty,
+        refill,
+        price,
+        prodRate: order > 0 ? (outQty / order) : null,
+        diffQty,
+        diffAmt,
+        scrapQty,
+        scrapAmt,
+        overuseQty,
+        overuseAmt,
+        __sheet: sn
+      });
+    }
   }
 
+  // 去除重覆：以 date+product+semi 作 key（若 date 為 null，則只保留第一筆）
+  const seen = new Set();
+  const dedup = [];
+  for (const it of out) {
+    const k = (it.date || 'null') + '|' + it.product + '|' + it.semi;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    dedup.push(it);
+  }
+  return dedup;
+}
 async function loadAllData() {
   $('dataStatus').innerHTML = '<span class="loader"></span> 載入中...';
   $('dataStatus').classList.remove('chip');
@@ -832,41 +994,42 @@ async function loadAllData() {
     if (!r.ok) throw new Error('讀取失敗：' + f);
     const ab = await r.arrayBuffer();
     const wb = XLSX.read(ab, {type:'array', cellDates:true});
-    sum = sum.concat(parseSummaryFromWB(wb));
-    det = det.concat(parseDetailsFromWB(wb));
+    sum = sum.concat(parseSummaryFromWB(wb, f));
+    det = det.concat(parseDetailsFromWB(wb, f));
   }
 
   // dedupe summary by date (keep last)
   const m = new Map();
   for (const r of sum) m.set(r.date, r);
-  state.summary = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
-  state.details = det.sort((a,b)=>a.date.localeCompare(b.date));
+  state.summary = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+  state.details = det.sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   state.dateMin = state.summary[0].date;
   state.dateMax = state.summary[state.summary.length-1].date;
 
   $('dataStatus').textContent = '已載入 ' + files.length + ' 份檔案';
-  $('fileLabel').textContent = '檔案：' + files.length + ' 份（manifest.json）';
-  $('detailLabel').textContent = '明細：' + state.details.length.toLocaleString('zh-TW') + ' 筆';
 }
 
 function buildSelectors() {
   const years = Array.from(new Set(state.summary.map(r => r.date.slice(0,4)))).sort();
   state.years = years;
-
   $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-  // month options depend on year
-  const monthsAll = Array.from(new Set(state.summary.map(r => r.date.slice(0,7)))).sort();
-  state.months = monthsAll;
+  // months by year (only show months with data)
+  const monthsByYear = new Map();
+  for (const r of state.summary) {
+    const y = r.date.slice(0,4);
+    const mm = r.date.slice(5,7);
+    if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
+    monthsByYear.get(y).add(mm);
+  }
+  state.monthsByYear = {};
+  for (const [y, set] of monthsByYear.entries()) {
+    state.monthsByYear[y] = Array.from(set).sort();
+  }
 
-  $('monthSel').innerHTML = Array.from({length:12}, (_,i)=>i+1).map(m => {
-    const mm = String(m).padStart(2,'0');
-    return `<option value="${mm}">${m} 月</option>`;
-  }).join('');
-
-  // week list (週二～週一)
+  // week list (週二～週一) built from all summary dates
   const weekStart = (dateStr) => {
     const d = parseMaybeDate(dateStr);
     if (!d) return null;
@@ -876,6 +1039,7 @@ function buildSelectors() {
     s.setDate(s.getDate() - diff);
     return s;
   };
+
   const wkMap = new Map();
   for (const r of state.summary) {
     const s = weekStart(r.date);
@@ -883,29 +1047,81 @@ function buildSelectors() {
     const key = toISO(s);
     if (!wkMap.has(key)) {
       const e = new Date(s);
-      e.setDate(e.getDate()+6);
-      wkMap.set(key, {start:key, end:toISO(e)});
+      e.setDate(e.getDate() + 6);
+      wkMap.set(key, { start: key, end: toISO(e) });
     }
   }
-  state.weeks = Array.from(wkMap.values()).sort((a,b)=>a.start.localeCompare(b.start));
-  $('weekSel').innerHTML = state.weeks.map(w => `<option value="${w.start}">${w.start} ～ ${w.end}</option>`).join('');
+  state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>safeLocaleCompare(a.start,b.start));
+
+  const renderMonthOptions = (year) => {
+    const months = state.monthsByYear[year] || [];
+    if (!months.length) {
+      $('monthSel').innerHTML = `<option value="">—</option>`;
+      return;
+    }
+    $('monthSel').innerHTML = months.map(mm => {
+      const mNum = Number(mm);
+      return `<option value="${mm}">${mNum} 月</option>`;
+    }).join('');
+  };
+
+  const filterWeeksForYM = (year, month) => {
+    if (!year || !month) return [];
+    const s = new Date(Number(year), Number(month) - 1, 1);
+    const e = new Date(Number(year), Number(month), 0);
+    const out = [];
+    for (const w of state.weeksAll) {
+      const ws = new Date(w.start);
+      const we = new Date(w.end);
+      // overlap with month range
+      if (we < s || ws > e) continue;
+      out.push(w);
+    }
+    return out;
+  };
+
+  const renderWeekOptions = (year, month, preferStart=null) => {
+    const weeks = filterWeeksForYM(year, month);
+    state.weeks = weeks;
+    if (!weeks.length) {
+      $('weekSel').innerHTML = `<option value="">（無週別資料）</option>`;
+      $('weekSel').value = '';
+      return;
+    }
+    $('weekSel').innerHTML = weeks.map(w => `<option value="${w.start}">${w.start} ～ ${w.end}</option>`).join('');
+    if (preferStart && weeks.some(w => w.start === preferStart)) {
+      $('weekSel').value = preferStart;
+    } else {
+      $('weekSel').value = weeks[weeks.length - 1].start; // latest in month
+    }
+  };
+
+  // expose to wireUI
+  state.renderMonthOptions = renderMonthOptions;
+  state.renderWeekOptions = renderWeekOptions;
 
   // default: latest year
   const latestYear = state.dateMax.slice(0,4);
   $('yearSel').value = latestYear;
   state.selection.year = latestYear;
 
-  // default month: latest month
-  $('monthSel').value = state.dateMax.slice(5,7);
-  state.selection.month = state.dateMax.slice(5,7);
+  // month options for year, default to latest month in data (or last available)
+  renderMonthOptions(latestYear);
+  let defMonth = state.dateMax.slice(5,7);
+  const availMonths = state.monthsByYear[latestYear] || [];
+  if (availMonths.length && !availMonths.includes(defMonth)) defMonth = availMonths[availMonths.length - 1] || defMonth;
+  $('monthSel').value = defMonth || '';
+  state.selection.month = defMonth || '';
 
-  // default week: latest date's week
-  const latestWeekStart = weekStart(state.dateMax);
-  if (latestWeekStart) {
-    $('weekSel').value = toISO(latestWeekStart);
-    state.selection.weekStart = toISO(latestWeekStart);
-  }
+  // week options constrained by selected year+month
+  const prefer = (() => {
+    const s = weekStart(state.dateMax);
+    return s ? toISO(s) : null;
+  })();
+  renderWeekOptions(latestYear, defMonth, prefer);
+  state.selection.weekStart = $('weekSel').value || '';
 
+  // day defaults
   $('daySel').value = state.dateMax;
   state.selection.day = state.dateMax;
 
@@ -914,14 +1130,12 @@ function buildSelectors() {
   state.selection.start = state.dateMin;
   state.selection.end = state.dateMax;
 
-  // default KPI selection
-  for (const cb of document.querySelectorAll('input[type=checkbox][data-kpi]')) {
-    cb.checked = state.kpiSelected.includes(cb.dataset.kpi);
-  }
-  for (const cb of document.querySelectorAll('input[type=checkbox][data-item]')) {
-    cb.checked = ['prodRate','diffAmt'].includes(cb.dataset.item);
+  // default KPI selection (single)
+  for (const btn of document.querySelectorAll('button[data-kpi-single]')) {
+    btn.classList.toggle('active', btn.dataset.kpiSingle === state.kpiSelected[0]);
   }
 }
+
 
 function getDateRange() {
   const mode = state.mode;
@@ -967,49 +1181,79 @@ function filterByRange(arr, start, end) {
 }
 
 function aggGranularity(start, end) {
-  const forced = $('granSel').value;
-  if (forced !== 'auto') return forced;
-
+  // 顯示粒度：依「模式」決定（避免不同卡片/圖表行為不一致）
   if (state.mode === 'year') return 'month';
+  if (state.mode === 'month') return 'week'; // 月別以週別顯示（週二~週一）
+
   const sd = parseMaybeDate(start);
   const ed = parseMaybeDate(end);
   const days = Math.round((ed - sd) / 86400000) + 1;
+
+  // 其他模式：範圍太大則用週別，其餘用日別
   if (days > 90) return 'week';
   return 'day';
 }
 
 function groupKeyByGran(dateStr, gran) {
   if (gran === 'day') return dateStr;
-  if (gran === 'month') return dateStr.slice(0,7);
-
-  // week (週二～週一)
-  const d = parseMaybeDate(dateStr);
-  const day = d.getDay();
-  const diff = (day - 2 + 7) % 7;
-  const s = new Date(d); s.setDate(s.getDate() - diff);
-  const e = new Date(s); e.setDate(e.getDate() + 6);
-  return toISO(s) + '～' + toISO(e);
+  if (gran === 'month') return dateStr.slice(0, 7);
+  if (gran === 'week') {
+    const d = parseISO(dateStr);
+    const s = weekStartTue(d);
+    // 以「週起始日」做 key，x 軸可自然用 MM-DD 顯示
+    return toISO(s);
+  }
+  return dateStr;
 }
 
-function aggregateSeries(rows, metric, gran) {
+
+function aggregateSeries(rows, metric, gran, start = null, end = null) {
   const buckets = new Map();
+
+  const hasRange = (start instanceof Date) && (end instanceof Date);
+  const startT = hasRange ? start.getTime() : 0;
+  const endT   = hasRange ? end.getTime() : 0;
+
   for (const r of rows) {
-    const k = groupKeyByGran(r.date, gran);
-    if (!buckets.has(k)) buckets.set(k, {k, n:0, sum:0});
+    let k;
+
+    if (gran === 'week') {
+      const d = parseISO(r.date);
+      const ws = weekStartTue(d); // 週二~週一
+      // 月別模式：只顯示「起始日在該月範圍內」的週別
+      if (hasRange && state.mode === 'month') {
+        const t = ws.getTime();
+        if (t < startT || t > endT) continue;
+      }
+      k = toISO(ws);
+    } else {
+      k = groupKeyByGran(r.date, gran);
+    }
+
+    if (!buckets.has(k)) buckets.set(k, {k, n: 0, sum: 0});
     const b = buckets.get(k);
     b.n += 1;
     b.sum += (Number(r[metric]) || 0);
   }
-  const keys = Array.from(buckets.keys()).sort((a,b)=>a.localeCompare(b));
+
+  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a,b));
+
+  // 年別：固定顯示 1~12 月（即使某些月份無資料，也保留 x 軸刻度）
+  if (gran === 'month' && state.mode === 'year' && hasRange) {
+    const y = String(start.getFullYear());
+    keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
+  }
+
   const values = keys.map(k => {
     const b = buckets.get(k);
-    if (metric.endsWith('Rate') || metric.endsWith('Share')) {
-      return b.sum / b.n; // average of rates
-    }
-    return b.sum / b.n;   // average per day (because rows are daily)
+    if (!b) return null;
+    // rate/share：以平均呈現；金額/數量：同樣維持「平均/日」(bucket 內日平均)
+    return b.sum / Math.max(1, b.n);
   });
-  return {labels: keys, values};
+
+  return { labels: keys, values };
 }
+
 
 function updateKPICards(srows) {
   const n = srows.length || 1;
@@ -1024,21 +1268,11 @@ function updateKPICards(srows) {
   const overRate = avgRate('overuseRate');
 
   $('kpiSales').textContent = fmtMoney(sales);
-  $('kpiSalesSub').textContent = `合計：${fmtMoney(sum('sales'))}｜天數：${n}`;
-
-  $('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
-  $('kpiScrapAmtSub').textContent = `合計：${fmtMoney(sum('scrapAmt'))}｜天數：${n}`;
-
-  $('kpiScrapRate').textContent = fmtPct(scrapRate);
-  $('kpiScrapRateSub').textContent = `參考：日均值`;
-
-  $('kpiOverAmt').textContent = fmtMoney(overAmt);
-  $('kpiOverAmtSub').textContent = `合計：${fmtMoney(sum('overuseAmt'))}｜天數：${n}`;
-
-  $('kpiOverRate').textContent = fmtPct(overRate);
-  $('kpiOverRateSub').textContent = `參考：日均值`;
-
-  // top cards
+$('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
+$('kpiScrapRate').textContent = fmtPct(scrapRate);
+$('kpiOverAmt').textContent = fmtMoney(overAmt);
+$('kpiOverRate').textContent = fmtPct(overRate);
+// top cards
   const topScrapAmt = avgAmt('topScrapAmt');
   const topScrapShare = avgRate('topScrapShare');
   $('topScrapAmt').textContent = fmtMoney(topScrapAmt);
@@ -1075,113 +1309,75 @@ function destroyChart(key) {
   if (c) { c.destroy(); state.charts[key] = null; }
 }
 
+
+function computeBounds(values, kind) {
+  const arr = (values || []).map(Number).filter(v => Number.isFinite(v));
+  if (!arr.length) return null;
+
+  let mn = Math.min(...arr);
+  let mx = Math.max(...arr);
+
+  // padding
+  if (mn === mx) {
+    const pad = (mn === 0) ? 1 : Math.max(0.02, Math.abs(mn) * 0.08);
+    mn -= pad; mx += pad;
+  } else {
+    const pad = Math.max(0.02, (mx - mn) * 0.08);
+    mn -= pad; mx += pad;
+  }
+
+  // clamp mins (do NOT clamp max for rate; 實際生產率可能 > 100%)
+  if (kind === 'amt' || kind === 'qty' || kind === 'rate') mn = Math.max(0, mn);
+
+  // ensure sane ordering
+  if (mx <= mn) mx = mn + 1;
+
+  return { min: mn, max: mx };
+}
+
+
 function renderKPIChart(srows, start, end) {
-  destroyChart('kpi');
   const gran = aggGranularity(start, end);
 
-  const selected = state.kpiSelected.slice(0,2);
-  if (!selected.length) return;
+  const metric = state.kpiSelected && state.kpiSelected.length ? state.kpiSelected[0] : null;
+  if (!metric) return;
+
+  const _key = `kpi|${metric}|${toISO(start)}|${toISO(end)}|${gran}`;
+  if (state._kpiChartKey === _key) return;
+  state._kpiChartKey = _key;
+  destroyChart('kpi');
 
   const metricMeta = {
-    sales: {label:'營業額', axis:'y', kind:'amt'},
-    scrapAmt: {label:'報廢額', axis:'y', kind:'amt'},
-    overuseAmt: {label:'超用額', axis:'y', kind:'amt'},
-    scrapRate: {label:'報廢率', axis:'y1', kind:'rate'},
-    overuseRate: {label:'超用率', axis:'y1', kind:'rate'},
+    sales: {label:'營業額', kind:'amt'},
+    scrapAmt: {label:'報廢額', kind:'amt'},
+    overuseAmt: {label:'超用額', kind:'amt'},
+    scrapRate: {label:'報廢率', kind:'rate'},
+    overuseRate: {label:'超用率', kind:'rate'},
   };
+  const meta = metricMeta[metric] || {label: metric, kind:'amt'};
 
-  const labels = (() => {
-    // use labels from first series
-    const s = aggregateSeries(srows, selected[0], gran);
-    return s.labels;
-  })();
+  const s = aggregateSeries(srows, metric, gran, start, end);
+  const labels = s.labels;
+  const bounds = computeBounds(s.values, meta.kind);
 
-  const datasets = selected.map((m, idx) => {
-    const s = aggregateSeries(srows, m, gran);
-    const meta = metricMeta[m];
-    return {
-      label: meta.label,
-      data: s.values,
-      yAxisID: meta.axis,
-      tension: 0.25,
-      pointRadius: labels.length > 45 ? 0 : 2
-    };
-  });
+  const unitText = meta.kind === 'rate' ? '%' : 'NT$';
+  const fmtTick = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '';
+    if (meta.kind === 'rate') return (n * 100).toFixed(1);
+    return Math.round(n).toLocaleString('zh-TW');
+  };
+  const fmtTip = (v) => meta.kind === 'rate' ? fmtPct(v) : fmtMoney(v);
 
   const ctx = $('kpiChart').getContext('2d');
   state.charts.kpi = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'top' },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const id = ctx.dataset.yAxisID;
-              const v = ctx.parsed.y;
-              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
-            }
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            callback: (v) => fmtMoney(v).replace('NT$ ','')
-          }
-        },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: {
-            callback: (v) => (v*100).toFixed(1) + '%'
-          }
-        }
-      }
-    }
-  });
-}
-
-function renderRightChart(srows, start, end) {
-  destroyChart('right');
-  const gran = aggGranularity(start, end);
-
-  let amtKey, shareKey, title;
-  if (state.rightMode === 'scrapTop10') {
-    amtKey = 'topScrapAmt'; shareKey = 'topScrapShare'; title = '廢棄前10名';
-  } else if (state.rightMode === 'overTop10') {
-    amtKey = 'topOverAmt'; shareKey = 'topOverShare'; title = '超用前10名';
-  } else {
-    amtKey = 'sharedAmt'; shareKey = 'sharedShare'; title = '共用類廢棄';
-  }
-
-  const sAmt = aggregateSeries(srows, amtKey, gran);
-  const sShare = aggregateSeries(srows, shareKey, gran);
-
-  const labels = sAmt.labels;
-  const ctx = $('rightChart').getContext('2d');
-  state.charts.right = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [
         {
-          label: title + '｜金額總計（平均/日）',
-          data: sAmt.values,
-          yAxisID: 'y',
-          tension: 0.25,
-          pointRadius: labels.length > 45 ? 0 : 2
-        },
-        {
-          label: title + '｜構成比（平均）',
-          data: sShare.values,
-          yAxisID: 'y1',
+          label: meta.label,
+          data: s.values,
           tension: 0.25,
           pointRadius: labels.length > 45 ? 0 : 2
         }
@@ -1192,31 +1388,111 @@ function renderRightChart(srows, start, end) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const id = ctx.dataset.yAxisID;
-              const v = ctx.parsed.y;
-              return ' ' + ctx.dataset.label + ': ' + (id==='y1' ? fmtPct(v) : fmtMoney(v));
-            }
+            title: (items) => items && items.length ? items[0].label : '',
+            label: (ctx) => ' ' + meta.label + ': ' + fmtTip(ctx.parsed.y)
           }
         }
       },
       scales: {
-        y: {
-          beginAtZero: true,
+        x: {
           ticks: {
-            callback: (v) => fmtMoney(v).replace('NT$ ','')
+            callback: function(value) {
+              return shortLabel(this.getLabelForValue(value));
+            }
           }
         },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: {
-            callback: (v) => (v*100).toFixed(1) + '%'
+        y: {
+          beginAtZero: false,
+          title: { display: true, text: unitText },
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
+          ticks: { callback: (v) => fmtTick(v) }
+        }
+      }
+    }
+  });
+}
+
+function renderRightChart(srows, start, end) {
+  const gran = aggGranularity(start, end);
+
+  const _key = `right|${state.rightMode}|${state.rightMetric}|${toISO(start)}|${toISO(end)}|${gran}`;
+  if (state._rightChartKey === _key) return;
+  state._rightChartKey = _key;
+  destroyChart('right');
+
+  let amtKey, shareKey, title;
+  if (state.rightMode === 'scrapTop10') {
+    amtKey = 'topScrapAmt'; shareKey = 'topScrapShare'; title = '廢棄前10名';
+  } else if (state.rightMode === 'overTop10') {
+    amtKey = 'topOverAmt'; shareKey = 'topOverShare'; title = '超用前10名';
+  } else {
+    amtKey = 'sharedAmt'; shareKey = 'sharedShare'; title = '共用類廢棄';
+  }
+
+  const isShare = state.rightMetric === 'share';
+  const metricKey = isShare ? shareKey : amtKey;
+  const meta = { kind: isShare ? 'rate' : 'amt' };
+  const unitText = meta.kind === 'rate' ? '%' : 'NT$';
+  const fmtTick = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '';
+    if (meta.kind === 'rate') return (n * 100).toFixed(1);
+    return Math.round(n).toLocaleString('zh-TW');
+  };
+  const fmtTip = (v) => meta.kind === 'rate' ? fmtPct(v) : fmtMoney(v);
+
+  const s = aggregateSeries(srows, metricKey, gran, start, end);
+  const labels = s.labels;
+  const bounds = computeBounds(s.values, meta.kind);
+
+  let dsLabel = title + (isShare ? '｜構成比（平均）' : '｜金額總計（平均/日）');
+  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)（平均）';
+
+  const ctx = $('rightChart').getContext('2d');
+  state.charts.right = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: dsLabel,
+          data: s.values,
+          tension: 0.25,
+          pointRadius: labels.length > 45 ? 0 : 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items && items.length ? items[0].label : '',
+            label: (ctx) => ' ' + dsLabel + ': ' + fmtTip(ctx.parsed.y)
           }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            callback: function(value) {
+              return shortLabel(this.getLabelForValue(value));
+            }
+          }
+        },
+        y: {
+          beginAtZero: false,
+          title: { display: true, text: unitText },
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
+          ticks: { callback: (v) => fmtTick(v) }
         }
       }
     }
@@ -1336,7 +1612,11 @@ function renderSuggest(containerId, items, onClick) {
     </div>
   `).join('');
   wrap.querySelectorAll('[data-idx]').forEach(el => {
-    el.addEventListener('click', () => onClick(items[Number(el.dataset.idx)]));
+    el.addEventListener('click', () => {
+      onClick(items[Number(el.dataset.idx)]);
+      wrap.classList.add('hidden');
+      wrap.innerHTML = '';
+    });
   });
 }
 
@@ -1348,16 +1628,27 @@ function getSelectedRangeRows() {
 }
 
 function renderAll() {
-  const {start, end, srows, drows} = getSelectedRangeRows();
+  const { start, end, srows, drows } = getSelectedRangeRows();
+  state.view = { start, end, srows, drows };
 
-  $('rangeLabel').textContent = `範圍：${start} ～ ${end}（${srows.length} 天）`;
   updateKPICards(srows);
-
   renderKPIChart(srows, start, end);
   renderRightChart(srows, start, end);
-
   applyGroupFilterAndRender(drows);
 }
+
+function renderKPIOnly() {
+  if (!state.view) return renderAll();
+  renderKPIChart(state.view.srows, state.view.start, state.view.end);
+}
+
+function renderRightOnly() {
+  if (!state.view) return renderAll();
+  renderRightChart(state.view.srows, state.view.start, state.view.end);
+}
+
+
+
 
 function renderSelectedItem() {
   if (!state.selectedKey) {
@@ -1395,7 +1686,7 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
   }
-  const daily = Array.from(m.values()).sort((a,b)=>a.date.localeCompare(b.date));
+  const daily = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   for (const o of daily) {
     o.price = o.priceN ? (o.priceSum / o.priceN) : null;
     o.prodRate = o.order>0 ? (o.output / o.order) : null;
@@ -1413,75 +1704,188 @@ function renderSelectedItem() {
 
 function renderItemChart(daily) {
   destroyChart('item');
-  const selected = Array.from(document.querySelectorAll('input[type=checkbox][data-item]'))
-    .filter(cb => cb.checked)
-    .map(cb => cb.dataset.item);
 
-  const meta = {
-    prodRate: {label:'實際生產率', axis:'y1', fmt:(v)=>fmtPct(v)},
-    diffAmt: {label:'差異金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    scrapAmt: {label:'報廢金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    overuseAmt: {label:'超用金額', axis:'y', fmt:(v)=>fmtMoney(v)},
-    refillQty: {label:'補單量', axis:'y2', fmt:(v)=>fmtInt(v)},
-  };
-
-  const labels = daily.map(r => r.date);
-  const datasets = selected.map(m => {
-    const axis = meta[m].axis;
-    const data = daily.map(r => {
-      if (m === 'prodRate') return r.prodRate ?? null;
-      if (m === 'refillQty') return r.refill ?? 0;
-      return Number(r[m]) || 0;
-    });
-    return {
-      label: meta[m].label,
-      data,
-      yAxisID: axis,
-      tension: 0.25,
-      pointRadius: labels.length > 45 ? 0 : 2
-    };
+  const metric = state.itemMetricSelected || 'diffAmt';
+  // sync UI active state
+  document.querySelectorAll('button[data-item-single]').forEach(b => {
+    b.classList.toggle('active', b.dataset.itemSingle === metric);
   });
 
+  const meta = {
+    prodRate: {
+      label: '實際生產率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => r.prodRate,
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
+    },
+    diffAmt: {
+      label: '差異金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.diffAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    scrapAmt: {
+      label: '報廢金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.scrapAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    overuseAmt: {
+      label: '超用金額',
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => r.overuseAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    refillQty: {
+      label: '補單量',
+      kind: 'qty',
+      unitTitle: '數量',
+      get: (r) => r.refill,
+      fmt: (v) => fmtInt(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    }
+  };
+
+  const m = meta[metric] || meta.diffAmt;
+
+  // === X 軸顯示規則（依目前時間範圍模式）===
+  // 年別：以「月」為單位（1月、2月…）
+  // 月別：以「週別」為單位（顯示週別起始日：MM/DD）
+  // 週別：以「日別」為單位（顯示 M/D）
+  // 其他（日別/指定範圍）：維持原本 MM-DD
+  const mode = state.mode || 'range';
+  const parsed = daily
+    .map(r => ({ ...r, _d: parseMaybeDate(r.date) }))
+    .filter(r => r._d && !isNaN(r._d));
+
+  parsed.sort((a,b) => a._d - b._d);
+
+  const fmtMD = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+  const fmtMMDD = (d) => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
+  const weekStartTue = (d) => {
+    // 週二～週一：找出「該日所屬週」的週二作為 weekStart
+    const wd = d.getDay(); // 0=Sun ... 2=Tue
+    const diff = (wd - 2 + 7) % 7;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+  };
+
+  const buckets = new Map(); // key -> { d:Date, label:string, sum:number, cnt:number }
+  const isRate = (m.kind === 'rate');
+
+  const addToBucket = (key, d, label, v) => {
+    if (!buckets.has(key)) buckets.set(key, { d, label, sum: 0, cnt: 0 });
+    const b = buckets.get(key);
+    if (v == null || !Number.isFinite(Number(v))) return;
+    b.sum += Number(v);
+    b.cnt += 1;
+  };
+
+  if (mode === 'year') {
+    const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
+
+    // 年別：X 軸固定顯示整年 1~12 月（即使沒有資料也保留月份）
+    for (let mi = 0; mi < 12; mi++) {
+      const key = `${ySel}-${String(mi+1).padStart(2,'0')}`;
+      const d0 = new Date(ySel, mi, 1);
+      const label = `${mi+1}月`;
+      if (!buckets.has(key)) buckets.set(key, { d: d0, label, sum: 0, cnt: 0 });
+    }
+
+    for (const r of parsed) {
+      const d = r._d;
+      if (d.getFullYear() !== ySel) continue;
+      const monthIdx = d.getMonth(); // 0-11
+      const key = `${ySel}-${String(monthIdx+1).padStart(2,'0')}`;
+      const v = m.get(r);
+      // 年別：金額/數量用「加總」，比率用「平均」
+      addToBucket(key, new Date(ySel, monthIdx, 1), `${monthIdx+1}月`, v);
+    }
+  } else if (mode === 'month') {
+    for (const r of parsed) {
+      const ws = weekStartTue(r._d);
+      const key = toISO(ws);
+      const label = fmtMMDD(ws);
+      const v = m.get(r);
+      // 月別：金額/數量用「加總」，比率用「平均」
+      addToBucket(key, ws, label, v);
+    }
+  } else if (mode === 'week') {
+    for (const r of parsed) {
+      const d = r._d;
+      const key = toISO(d);
+      const label = fmtMD(d);
+      const v = m.get(r);
+      addToBucket(key, d, label, v);
+    }
+  } else {
+    // day / range：保持原本的 MM-DD 顯示
+    for (const r of parsed) {
+      const d = r._d;
+      const key = toISO(d);
+      const label = shortLabel(toISO(d));
+      const v = m.get(r);
+      addToBucket(key, d, label, v);
+    }
+  }
+
+  const points = Array.from(buckets.values()).sort((a,b) => a.d - b.d);
+  const labels = points.map(p => p.label);
+  const values = points.map(p => {
+    if (!p.cnt) return null;
+    // 比率 => 平均；金額/數量 => 加總（依你要的「以單位彙總」呈現）
+    return isRate ? (p.sum / p.cnt) : p.sum;
+  });
+
+  const bounds = computeBounds(values, m.kind);
+
   const ctx = $('itemChart').getContext('2d');
+
   state.charts.item = new Chart(ctx, {
     type: 'line',
-    data: {labels, datasets},
+    data: {
+      labels,
+      datasets: [{
+        label: m.label,
+        data: values,
+        borderWidth: 3,
+        tension: 0.25,
+        spanGaps: true,
+        pointRadius: 3,
+        pointHoverRadius: 4
+      }]
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode:'index', intersect:false },
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position:'top' },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const m = selected[ctx.datasetIndex];
-              const v = ctx.parsed.y;
-              if (!m) return ' ';
-              if (m === 'prodRate') return ' ' + ctx.dataset.label + ': ' + fmtPct(v);
-              if (m === 'refillQty') return ' ' + ctx.dataset.label + ': ' + fmtInt(v);
-              return ' ' + ctx.dataset.label + ': ' + fmtMoney(v);
-            }
+            label: (c) => `${m.label}：${m.fmt(c.parsed.y)}`
           }
         }
       },
       scales: {
+        x: {
+          grid: { display: false },
+          ticks: { maxRotation: 0, autoSkip: true }
+        },
         y: {
-          beginAtZero: true,
-          ticks: { callback: (v)=>fmtMoney(v).replace('NT$ ','') }
-        },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea:false },
-          ticks: { callback: (v)=>(v*100).toFixed(1)+'%' }
-        },
-        y2: {
-          beginAtZero: true,
-          position: 'right',
-          grid: { drawOnChartArea:false },
-          display: selected.includes('refillQty'),
-          ticks: { callback: (v)=>fmtInt(v) }
+          beginAtZero: false,
+          min: bounds ? bounds.min : undefined,
+          max: bounds ? bounds.max : undefined,
+          title: { display: true, text: m.unitTitle },
+          ticks: { callback: (v) => m.tick(v) }
         }
       }
     }
@@ -1570,8 +1974,31 @@ function wireUI() {
       document.querySelectorAll('button.seg-btn[data-right]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.rightMode = btn.dataset.right;
-      renderAll();
+      renderRightOnly();
     });
+  });
+
+  // right chart metric buttons（金額 / 構成比）
+  document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button.seg-btn[data-right-metric]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.rightMetric = btn.dataset.rightMetric;
+      renderRightOnly();
+    });
+  });
+
+  // keep week options aligned with selected year/month（不需按「套用」也會更新週別清單）
+  $('yearSel').addEventListener('change', () => {
+    const y = $('yearSel').value;
+    if (state.renderMonthOptions) state.renderMonthOptions(y);
+    const m = $('monthSel').value;
+    if (state.renderWeekOptions) state.renderWeekOptions(y, m, null);
+  });
+  $('monthSel').addEventListener('change', () => {
+    const y = $('yearSel').value;
+    const m = $('monthSel').value;
+    if (state.renderWeekOptions) state.renderWeekOptions(y, m, null);
   });
 
   // apply
@@ -1604,24 +2031,21 @@ function wireUI() {
     }
   });
 
-  // KPI selection max 2
-  document.querySelectorAll('input[type=checkbox][data-kpi]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const all = Array.from(document.querySelectorAll('input[type=checkbox][data-kpi]'));
-      const chosen = all.filter(x => x.checked).map(x => x.dataset.kpi);
-      if (chosen.length > 2) {
-        cb.checked = false;
-        toast('KPI 趨勢圖最多選 2 個指標');
-        return;
-      }
-      state.kpiSelected = chosen;
-      renderAll();
+  // KPI selection (single)
+  document.querySelectorAll('button[data-kpi-single]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button[data-kpi-single]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.kpiSelected = [btn.dataset.kpiSingle];
+      renderKPIOnly();
     });
   });
-
-  // item chart selection
-  document.querySelectorAll('input[type=checkbox][data-item]').forEach(cb => {
-    cb.addEventListener('change', () => {
+// item chart selection (single)
+  document.querySelectorAll('button[data-item-single]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('button[data-item-single]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.itemMetricSelected = btn.dataset.itemSingle;
       if (!state.selectedKey) return;
       renderSelectedItem();
     });
@@ -1637,6 +2061,8 @@ function wireUI() {
       $('productSearch').value = row.product;
       $('semiSearch').value = row.semi;
       state.selectedKey = row.key;
+      $('productSuggest').classList.add('hidden');
+      $('semiSuggest').classList.add('hidden');
       renderAll();
       renderSelectedItem();
     });
@@ -1650,6 +2076,8 @@ function wireUI() {
       $('productSearch').value = row.product;
       $('semiSearch').value = row.semi;
       state.selectedKey = row.key;
+      $('productSuggest').classList.add('hidden');
+      $('semiSuggest').classList.add('hidden');
       renderAll();
       renderSelectedItem();
     });
@@ -1668,7 +2096,7 @@ function wireUI() {
 
 function syncModeUI() {
   $('yearWrap').classList.toggle('hidden', false);
-  $('monthWrap').classList.toggle('hidden', state.mode !== 'month');
+  $('monthWrap').classList.toggle('hidden', !(state.mode === 'month' || state.mode === 'week'));
   $('weekWrap').classList.toggle('hidden', state.mode !== 'week');
   $('dayWrap').classList.toggle('hidden', state.mode !== 'day');
   $('rangeWrap').classList.toggle('hidden', state.mode !== 'range');
@@ -1679,6 +2107,7 @@ async function init(force=false) {
     await loadAllData();
     buildSelectors();
     wireUI();
+    initStickyControls();
     syncModeUI();
     renderAll();
     state.loaded = true;
