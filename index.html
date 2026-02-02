@@ -508,12 +508,12 @@ function parseISO(s){
   }
   const str = String(s).trim();
   // 民國 114/07/01 -> 2025/07/01
-  const roc = str.match(/^(\d{3})[\/-\.](\d{1,2})[\/-\.](\d{1,2})/);
+  const roc = str.match(/^(\d{3})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
   if (roc) {
     const y = Number(roc[1]) + 1911;
     return new Date(y, Number(roc[2]) - 1, Number(roc[3]));
   }
-  const m = str.match(/^(\d{4})[\/-\.](\d{1,2})[\/-\.](\d{1,2})/);
+  const m = str.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
   if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const d = new Date(str);
   return isNaN(d) ? null : d;
