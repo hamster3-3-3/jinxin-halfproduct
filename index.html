@@ -791,46 +791,131 @@ function parseSummaryFromWB(wb, fileName) {
 }
 
 function parseDetailsFromWB(wb, fileNameOrMeta) {
+  const fileName = (typeof fileNameOrMeta === 'string')
+    ? fileNameOrMeta
+    : (fileNameOrMeta && fileNameOrMeta.fileName) ? String(fileNameOrMeta.fileName) : '';
+
+  // 依檔名推回年分（避免明細頁沒有日期欄時全部變成 null）
+  const baseStart = parseFileStartFromName(fileName);
+  const yearHint = baseStart ? baseStart.getFullYear() : null;
+
   const out = [];
+  const sheets = wb.SheetNames || [];
 
-  // 由檔名推估年份（2025-0701... 或 114.07...）
-  const yearHint = (() => {
-    const s = (typeof fileNameOrMeta === 'string' ? fileNameOrMeta : (fileNameOrMeta && fileNameOrMeta.name)) || '';
-    const m1 = String(s).match(/(20\d{2})/);
-    if (m1) return +m1[1];
-    const m2 = String(s).match(/(^|[^\d])(\d{3})[.\-/]/); // 民國 3 碼年
-    if (m2) return +m2[2] + 1911;
+  // 支援：0731合計 / 合計0731（每日彙總頁：日期通常不在欄位內）
+  function extractMMDDFromSheetName(sTrim) {
+    let m = sTrim.match(/^合計\s*(\d{4})/);
+    if (m) return m[1];
+    m = sTrim.match(/^(\d{4})\s*合計/);
+    if (m) return m[1];
     return null;
-  })();
+  }
 
+  function sheetNameToISODate(mmdd) {
+    if (!yearHint) return null;
+    const mm = Number(mmdd.slice(0,2));
+    const dd = Number(mmdd.slice(2,4));
+    if (!(mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31)) return null;
+    return toISO(new Date(yearHint, mm - 1, dd));
+  }
 
-  // 兼容多版本明細分頁命名：
-  // 1) 合計MMDD / 合計MM/DD
-  // 2) 01-30合計 / 01-31合計 / 01-27合計 / 01-13合計（各月份彙整明細）
-  // 3) 其他含「合計」但非「日別報廢率總表」的分頁（仍會再靠欄位表頭判斷）
-  const sheets = wb.SheetNames.filter((name) => {
-    const t = String(name || '').trim();
-    const compact = t.replace(/\s+/g, '');
-    if (!compact) return false;
-    if (compact.includes('日別報廢率總表')) return false;
-    // 明細類
-    if (/^合計(\d{2,4})([\/-]?\d{2})?$/i.test(compact)) return true;        // 合計MMDD 或 合計MM/DD
-    if (/^\d{2}-\d{2}合計$/i.test(compact)) return true;                    // 01-30合計
-    if (compact.includes('合計')) return true;
-    return false;
-  });
+  for (const snRaw of sheets) {
+    const sn = String(snRaw || '');
+    const sTrim = sn.trim();
 
-  const toStr = (v) => (v == null ? '' : String(v).trim());
+    const mmdd = extractMMDDFromSheetName(sTrim);
+    if (!mmdd) continue;
 
-  const normKey = (s) => toStr(s).replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')');
+    // 排除 01-30合計 這類「區間合計」頁
+    if (sTrim.match(/^\d{2}\s*-\s*\d{2}\s*合計/)) continue;
 
-  const findCol = (hdr, keys) => {
-    const h = hdr.map(normKey);
-    for (const k of keys) {
-      const kk = normKey(k);
-      const idx = h.findIndex(x => x === kk || x.includes(kk));
-      if (idx >= 0) return idx;
+    const sheetISO = sheetNameToISODate(mmdd);
+    const ws = wb.Sheets[snRaw];
+    if (!ws) continue;
+
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
+    if (!rows || !rows.length) continue;
+
+    // 找表頭：包含「商品名稱」與「半成品名稱」
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(rows.length, 30); i++) {
+      const r = rows[i] || [];
+      const joined = r.map(v => String(v ?? '')).join(' ');
+      if (joined.includes('商品名稱') && joined.includes('半成品名稱')) { headerRowIdx = i; break; }
     }
+    if (headerRowIdx < 0) continue;
+
+    const header = (rows[headerRowIdx] || []).map(normalizeHeader);
+
+    const idxDate = findIndex(header, ['日期', '生產日', '日別']); // 有些格式會有日期欄
+    const idxProd = findIndex(header, ['商品名稱', '品名']);
+    const idxSemi = findIndex(header, ['半成品名稱', '半成品名', '半成品']);
+    const idxOrder = findIndex(header, ['訂單量', '訂單數', '需求量', '需求數']);
+    const idxOutput = findIndex(header, ['出料量', '出料數', '實際產量', '實際生產量', '生產量', '實際量']);
+    const idxRefill = findIndex(header, ['補單量', '補單數', '加單量', '補單']);
+    const idxPrice = findIndex(header, ['單價', '價格']);
+    const idxDiffQty = findIndex(header, ['差異量', '差異數', '差異']);
+    const idxDiffAmt = findIndex(header, ['差異金額', '差異額', '差異量(金額)', '差異量（金額）']);
+    const idxScrapQty = findIndex(header, ['報廢量', '廢棄量', '報廢數', '廢棄數']);
+    const idxScrapAmt = findIndex(header, ['報廢金額', '廢棄金額', '報廢量(金額)', '廢棄量(金額)', '報廢量（金額）', '廢棄量（金額）']);
+    // 有些檔案只有「超用量(金額)」一欄
+    const idxOverAmt = findIndex(header, ['超用金額', '超用額', '超用量(金額)', '超用量（金額）']);
+    const idxOverQty = header.findIndex(h => h && h.includes('超用量') && !h.includes('金額') && !h.includes('額'));
+
+    for (let r = headerRowIdx + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+
+      const prod = (idxProd >= 0 ? String(row[idxProd] ?? '').trim() : '') || '';
+      const semi = (idxSemi >= 0 ? String(row[idxSemi] ?? '').trim() : '') || '';
+      if (!prod && !semi) continue;
+
+      // 日期：優先用欄位，沒有就用 sheet 名稱推回（0731合計 / 合計0731）
+      const dateVal = idxDate >= 0 ? parseMaybeDate(row[idxDate]) : null;
+      const date = dateVal || sheetISO;
+      if (!date) continue; // 明細一定要有日期才能做 range filter
+
+      const order = idxOrder >= 0 ? num(row[idxOrder]) : null;
+      const output = idxOutput >= 0 ? num(row[idxOutput]) : null;
+      const refill = idxRefill >= 0 ? num(row[idxRefill]) : null;
+      const price = idxPrice >= 0 ? num(row[idxPrice]) : null;
+      const diffQty = idxDiffQty >= 0 ? num(row[idxDiffQty]) : null;
+      const diffAmt = idxDiffAmt >= 0 ? num(row[idxDiffAmt]) : null;
+      const scrapQty = idxScrapQty >= 0 ? num(row[idxScrapQty]) : null;
+      const scrapAmt = idxScrapAmt >= 0 ? num(row[idxScrapAmt]) : null;
+
+      let overuseAmt = null;
+      if (idxOverAmt >= 0) overuseAmt = num(row[idxOverAmt]);
+      else if (idxOverQty >= 0 && price && price > 0) overuseAmt = num(row[idxOverQty]) * price;
+
+      out.push({
+        date,
+        product: prod,
+        semi,
+        order,
+        output,
+        refill,
+        price,
+        diffQty,
+        diffAmt,
+        scrapQty,
+        scrapAmt,
+        overuseAmt
+      });
+    }
+  }
+
+  // 去重：同一天同品項/半成品只保留第一筆（避免合併儲存造成重複）
+  const seen = new Set();
+  const dedup = [];
+  for (const r of out) {
+    const key = `${r.date}||${r.product}||${r.semi}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedup.push(r);
+  }
+  return dedup;
+}
+
     return -1;
   };
 
@@ -938,11 +1023,11 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       const overuseAmt = idxOverAmt >= 0 ? (num(row[idxOverAmt]) ?? null) : null;
 
       out.push({
-        date: dateObj ? toISO(dateObj) : null,
+        date: dateObj ? dateObj.toISOString().slice(0, 10) : null,
         product: prod,
         semi,
         order,
-        output: outQty,
+        outQty,
         refill,
         price,
         prodRate: order > 0 ? (outQty / order) : null,
