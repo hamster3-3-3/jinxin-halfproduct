@@ -496,6 +496,29 @@ const toast = (msg) => {
 function safeStr(x){ return (x===null || x===undefined) ? '' : String(x); }
 function safeLocaleCompare(a,b){ return safeStr(a).localeCompare(safeStr(b)); }
 
+// --- helpers for details parsing ---
+function toStr(v){
+  if (v === null || v === undefined) return '';
+  return String(v).trim();
+}
+function asNumber(v){
+  if (v === null || v === undefined || v === '') return NaN;
+  if (typeof v === 'number') return isFinite(v) ? v : NaN;
+  // Date -> NaN
+  if (v instanceof Date) return NaN;
+  let s = String(v).trim();
+  if (!s) return NaN;
+  // Remove currency / units / commas
+  s = s.replace(/[, ]+/g,'');
+  s = s.replace(/^NT\$?/i,'');
+  s = s.replace(/[%]/g,'');
+  // Keep digits, dot, minus
+  s = s.replace(/[^0-9\.-]/g,'');
+  if (!s || s === '-' || s === '.' || s === '-.' ) return NaN;
+  const n = parseFloat(s);
+  return isFinite(n) ? n : NaN;
+}
+
 
 function initStickyControls(){
   const sentinel = document.getElementById('stickySentinel');
@@ -813,15 +836,16 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
 
   function parseMaybeDate(v) {
     if (v == null || v === '') return null;
+
+    if (v instanceof Date && !isNaN(v)) return v;
+
     // Excel serial number
     if (typeof v === 'number' && isFinite(v)) {
-      // XLSX.SSF.parse_date_code 需要 xlsx
       try {
         const dc = XLSX.SSF.parse_date_code(v);
         if (dc && dc.y && dc.m && dc.d) return new Date(dc.y, dc.m - 1, dc.d);
-      } catch(_) {}
+      } catch (_) {}
     }
-    if (v instanceof Date && !isNaN(v)) return v;
 
     const s = String(v).trim();
     // YYYY/MM/DD or YYYY-MM-DD
@@ -836,16 +860,18 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     return null;
   }
 
-
   // 從工作表名推估「當日」日期（用於沒有日期欄位的明細）
   function sheetNameToISO(sheetName) {
-    const n = String(sheetName || '').replace(/\s+/g,'');
+    const n = String(sheetName || '').replace(/\s+/g, '');
     // 0701合計 / 07/01合計 / 07-01合計
     let m = n.match(/^(\d{2})[\/-]?(\d{2})合計$/);
     if (m && yearHint) return toISOFromYMD(yearHint, m[1], m[2]);
     // 合計0701 / 合計07/01
     m = n.match(/^合計(\d{2})[\/-]?(\d{2})$/);
     if (m && yearHint) return toISOFromYMD(yearHint, m[1], m[2]);
+    // 合計1231 這種（已在上一條 cover），但容錯
+    m = n.match(/^合計(\d{4})$/);
+    if (m && yearHint) return toISOFromYMD(yearHint, m[1].slice(0,2), m[1].slice(2,4));
     // 2025-07-01 合計 (容錯)
     m = n.match(/^(20\d{2})[\/-](\d{2})[\/-](\d{2}).*合計$/);
     if (m) return toISOFromYMD(m[1], m[2], m[3]);
@@ -855,69 +881,129 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
   // 找到「可能是日別明細」的工作表
   const candidateSheets = wb.SheetNames
     .filter(sn => {
-      const n = String(sn||'').replace(/\s+/g,'');
+      const n = String(sn || '').replace(/\s+/g, '');
       if (!n.includes('合計')) return false;
       // 排除明顯的彙總表
       if (/各日合計|日別報廢率總表|報廢率總表|前10名|共用類|KPI/i.test(n)) return false;
-      // 放寬：只要含「合計」就當候選（後續以欄位判斷）
       return true;
     })
     .map(sn => ({ sn, fixedISO: sheetNameToISO(sn) }));
 
-  for (const {sn, fixedISO} of candidateSheets) {
+  const norm = (x) => normalizeHeader(x);
+
+  function rowHasAny(row, idxs) {
+    for (const k of idxs) {
+      if (k == null) continue;
+      const v = row?.[k];
+      if (v !== null && v !== undefined && v !== '') return true;
+    }
+    return false;
+  }
+
+  for (const { sn, fixedISO } of candidateSheets) {
     const ws = wb.Sheets[sn];
     if (!ws) continue;
 
-    const rows = XLSX.utils.sheet_to_json(ws, {defval: null, raw: true});
-    if (!rows || !rows.length) continue;
+    // 用 AOA 方式，因為這批檔案的「合計」頁常有第一列總額，真正表頭在第 2 列
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+    if (!aoa || !aoa.length) continue;
 
-    // header mapping
-    const keys = Object.keys(rows[0] || {});
-    const hmap = new Map(keys.map(k => [normalizeHeader(k), k]));
+    // 找表頭列（前 30 列內）
+    let hRow = -1;
+    const scanMax = Math.min(aoa.length, 30);
+    for (let i = 0; i < scanMax; i++) {
+      const row = aoa[i] || [];
+      const rowStr = row.map(c => norm(c)).join('|');
+      const hasProd = /商品(名|名稱)?|品名/.test(rowStr);
+      const hasSemi = /半成品(名|名稱)?|共用類/.test(rowStr);
+      const hasMetric = /訂單|需求|出料|實際|差異|報廢|超用|單價/.test(rowStr);
+      if (hasProd && hasSemi && hasMetric) { hRow = i; break; }
+    }
+    if (hRow < 0) continue;
 
-    const pick = (obj, ...names) => {
-      for (const n of names) {
-        const k = hmap.get(normalizeHeader(n));
-        if (k && (obj[k] !== undefined)) return obj[k];
-      }
-      return null;
+    const header = aoa[hRow] || [];
+    const idx = {
+      date: null, product: null, semi: null, price: null,
+      order: null, output: null, refill: null,
+      diffQty: null, diffAmt: null,
+      scrapQty: null, scrapAmt: null,
+      overuseQty: null, overuseAmt: null
     };
 
-    // 必要欄位：商品名 + 半成品名（或至少其中之一） + 訂單/實際/金額任一
-    const hasCore =
-      (hmap.has('商品名') || hmap.has('品名') || hmap.has('商品')) &&
-      (hmap.has('半成品名') || hmap.has('半成品') || hmap.has('半成品名稱') || hmap.has('共用類'));
+    for (let j = 0; j < header.length; j++) {
+      const h = norm(header[j]);
+      if (!h) continue;
 
-    const hasAnyMetric =
-      hmap.has('訂單需求') || hmap.has('訂單') ||
-      hmap.has('實際產出') || hmap.has('實際') ||
-      hmap.has('差異金額') || hmap.has('報廢金額') || hmap.has('超用金額');
+      if (idx.date == null && /(日期|生產日|出貨日|日別|製造日|製造日期)/.test(h)) idx.date = j;
 
-    if (!hasCore || !hasAnyMetric) continue; // 不是我們要的明細表
+      if (idx.product == null && /(商品名|商品名稱|品名|商品)$/.test(h)) idx.product = j;
+      if (idx.product == null && h.includes('商品') && h.includes('名')) idx.product = j;
 
-    for (const r of rows) {
-      // 日期：優先取欄位，沒有就用 sheet 固定日期
-      const dateCell =
-        pick(r, '日期', '生產日', '出貨日', '日別', '日') ??
-        pick(r, '製造日', '製造日期');
-      const dt = parseMaybeDate(dateCell);
-      const iso = dt ? toISO(dt) : fixedISO;
-      if (!iso) continue; // 沒日期無法納入區間
+      if (idx.semi == null && /(半成品名|半成品名稱|半成品|共用類|半成品類)/.test(h)) idx.semi = j;
 
-      const product = toStr(pick(r, '商品名','品名','商品'));
-      const semi = toStr(pick(r, '半成品名','半成品','半成品名稱','共用類','半成品類'));
+      if (idx.price == null && /單價|價格|unitprice/i.test(h)) idx.price = j;
 
-      // 數值欄位（容錯：不同版本欄名）
-      const order = asNumber(pick(r, '訂單需求','訂單','訂單量','需求量'));
-      const output = asNumber(pick(r, '實際產出','實際','產出','實際量','實際產量'));
-      const refill = asNumber(pick(r, '補單','補單量','補單數','補單數量'));
-      const unitPrice = asNumber(pick(r, '單價','價格','unit price'));
-      const diffQty = asNumber(pick(r, '差異量','差異','差異數量'));
-      const diffAmt = asNumber(pick(r, '差異金額','差異額','差額'));
-      const scrapQty = asNumber(pick(r, '報廢量','廢棄量','廢棄'));
-      const scrapAmt = asNumber(pick(r, '報廢金額','廢棄金額','廢棄額','報廢額'));
-      const overuseQty = asNumber(pick(r, '超用量','超用'));
-      const overuseAmt = asNumber(pick(r, '超用金額','超用額'));
+      if (idx.order == null && /(訂單|需求)/.test(h) && /量/.test(h)) idx.order = j;
+
+      if (idx.output == null && /(出料|實際|產出|出貨)/.test(h) && /量/.test(h)) idx.output = j;
+      if (idx.output == null && /出料量/.test(h)) idx.output = j;
+
+      if (idx.refill == null && /補單/.test(h)) idx.refill = j;
+
+      if (idx.diffQty == null && /差異/.test(h) && /量/.test(h) && !/(金額|差額|額)/.test(h)) idx.diffQty = j;
+      if (idx.diffAmt == null && /差異/.test(h) && /(金額|差額|額)/.test(h)) idx.diffAmt = j;
+
+      if (idx.scrapQty == null && /報廢/.test(h) && /量/.test(h) && !/(金額|差額|額)/.test(h)) idx.scrapQty = j;
+      if (idx.scrapAmt == null && /報廢/.test(h) && /(金額|差額|額)/.test(h)) idx.scrapAmt = j;
+
+      if (idx.overuseQty == null && /超用/.test(h) && /量/.test(h) && !/(金額|差額|額)/.test(h)) idx.overuseQty = j;
+      if (idx.overuseAmt == null && /超用/.test(h) && /(金額|差額|額)/.test(h)) idx.overuseAmt = j;
+    }
+
+    // 基本必要欄位：商品 + 半成品（或共用類）
+    if (idx.product == null || idx.semi == null) continue;
+
+    let blankStreak = 0;
+    for (let i = hRow + 1; i < aoa.length; i++) {
+      const row = aoa[i];
+      if (!row) continue;
+
+      const product = toStr(row[idx.product]);
+      const semi = toStr(row[idx.semi]);
+
+      const anyMetric = rowHasAny(row, [idx.order, idx.output, idx.refill, idx.diffAmt, idx.scrapAmt, idx.overuseAmt, idx.diffQty, idx.scrapQty]);
+      if (!product && !semi && !anyMetric) {
+        blankStreak += 1;
+        if (blankStreak >= 30) break; // 大段空白，視為結束
+        continue;
+      }
+      blankStreak = 0;
+
+      // 日期：優先取欄位，沒有就用 sheet 固定日期；再不行就嘗試第 1 欄
+      let iso = fixedISO;
+      if (!iso && idx.date != null) {
+        const dt = parseMaybeDate(row[idx.date]);
+        if (dt) iso = toISO(dt);
+      }
+      if (!iso) {
+        const dt0 = parseMaybeDate(row[0]);
+        if (dt0) iso = toISO(dt0);
+      }
+      if (!iso) continue;
+
+      const order = asNumber(row[idx.order]);
+      const output = asNumber(row[idx.output]);
+      const refill = asNumber(row[idx.refill]);
+      const price = asNumber(row[idx.price]);
+
+      const diffQty = asNumber(row[idx.diffQty]);
+      const diffAmt = asNumber(row[idx.diffAmt]);
+
+      const scrapQty = asNumber(row[idx.scrapQty]);
+      const scrapAmt = asNumber(row[idx.scrapAmt]);
+
+      const overuseQty = asNumber(row[idx.overuseQty]);
+      const overuseAmt = asNumber(row[idx.overuseAmt]);
 
       const prodRate = (Number.isFinite(order) && order > 0 && Number.isFinite(output)) ? (output / order) : null;
 
@@ -932,7 +1018,8 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
         output: Number.isFinite(output) ? output : null,
         outQty: Number.isFinite(output) ? output : null, // 兼容舊欄位
         refill: Number.isFinite(refill) ? refill : null,
-        unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+        price: Number.isFinite(price) ? price : null,     // 讓既有顯示/匯出邏輯可用
+        unitPrice: Number.isFinite(price) ? price : null, // 兼容
         prodRate: (prodRate === null ? null : prodRate),
         diffQty: Number.isFinite(diffQty) ? diffQty : null,
         diffAmt: Number.isFinite(diffAmt) ? diffAmt : null,
