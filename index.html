@@ -332,9 +332,17 @@
             <div class="text-sm font-semibold">半成品展開</div>
 </div>
           <div class="flex flex-wrap gap-2 items-center">
+            <div class="text-xs muted">類型</div>
+            <select id="sharedClassSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
+              <option value="all">全部</option>
+              <option value="shared">共用類</option>
+              <option value="nonShared">非共用類</option>
+            </select>
+            <div class="h-6 w-px bg-slate-200 mx-1"></div>
             <div class="text-xs muted">排序依據</div>
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
               <option value="diffAmt">差異金額（高→低）</option>
+              <option value="prodRate">實際生產率（高→低）</option>
               <option value="scrapAmt">報廢金額（高→低）</option>
               <option value="overuseAmt">超用金額（高→低）</option>
               <option value="refillQty">補單量（高→低）</option>
@@ -1615,8 +1623,12 @@ function applyGroupFilterAndRender(drows) {
 
   const kwProd = $('productSearch').value.trim().toLowerCase();
   const kwSemi = $('semiSearch').value.trim().toLowerCase();
+  const clsSel = document.getElementById('sharedClassSel');
+  const cls = clsSel ? clsSel.value : 'all';
 
   let filtered = state.groupRows;
+  if (cls === 'shared') filtered = filtered.filter(r => r.product === '共用類');
+  if (cls === 'nonShared') filtered = filtered.filter(r => r.product !== '共用類');
   if (kwProd) {
     filtered = filtered.filter(r => r.product.toLowerCase().includes(kwProd));
   }
@@ -1627,6 +1639,10 @@ function applyGroupFilterAndRender(drows) {
   const sort = $('sortSel').value;
   const by = (k) => (a,b) => (Number(b[k])||0) - (Number(a[k])||0);
   if (sort === 'diffAmt') filtered.sort(by('diffAmt'));
+  if (sort === 'prodRate') {
+    const v = (x) => (x==null ? -Infinity : Number(x));
+    filtered.sort((a,b) => v(b.prodRate) - v(a.prodRate));
+  }
   if (sort === 'scrapAmt') filtered.sort(by('scrapAmt'));
   if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
   if (sort === 'refillQty') filtered.sort(by('refillQty'));
@@ -1655,11 +1671,20 @@ function applyGroupFilterAndRender(drows) {
     tbody.appendChild(tr);
   }
 
-  // if selected item no longer in list, hide
-  if (state.selectedKey && !state.groupRows.some(x => x.key === state.selectedKey)) {
+  // if selected item no longer in filtered list, hide
+  if (state.selectedKey && !filtered.some(x => x.key === state.selectedKey)) {
     state.selectedKey = null;
     $('itemPanel').classList.add('hidden');
   }
+}
+
+function getGroupsForSuggest() {
+  let g = state.groupRows || [];
+  const clsSel = document.getElementById('sharedClassSel');
+  const cls = clsSel ? clsSel.value : 'all';
+  if (cls === 'shared') g = g.filter(r => r.product === '共用類');
+  if (cls === 'nonShared') g = g.filter(r => r.product !== '共用類');
+  return g;
 }
 
 function buildSuggestion(list, keyword, onPick) {
@@ -2128,8 +2153,10 @@ function wireUI() {
 
   // group filters
   $('sortSel').addEventListener('change', () => renderAll());
+  const _sharedSel = document.getElementById('sharedClassSel');
+  if (_sharedSel) _sharedSel.addEventListener('change', () => renderAll());
   $('productSearch').addEventListener('input', () => {
-    const items = buildSuggestion(state.groupRows, $('productSearch').value, null);
+    const items = buildSuggestion(getGroupsForSuggest(), $('productSearch').value, null);
     renderSuggest('productSuggest', items, (it) => {
       const row = state.groupRows.find(r => r.key === it.key);
       if (!row) return;
@@ -2144,7 +2171,7 @@ function wireUI() {
     renderAll();
   });
   $('semiSearch').addEventListener('input', () => {
-    const items = buildSuggestion(state.groupRows, $('semiSearch').value, null);
+    const items = buildSuggestion(getGroupsForSuggest(), $('semiSearch').value, null);
     renderSuggest('semiSuggest', items, (it) => {
       const row = state.groupRows.find(r => r.key === it.key);
       if (!row) return;
