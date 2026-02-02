@@ -496,28 +496,6 @@ const toast = (msg) => {
 function safeStr(x){ return (x===null || x===undefined) ? '' : String(x); }
 function safeLocaleCompare(a,b){ return safeStr(a).localeCompare(safeStr(b)); }
 
-// ISO parse (支援 YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD / Excel serial)
-function parseISO(s){
-  if (!s && s!==0) return null;
-  if (s instanceof Date) return s;
-  if (typeof s === 'number' && isFinite(s)) {
-    // Excel serial date (days since 1899-12-30)
-    const d = new Date(Date.UTC(1899,11,30));
-    d.setUTCDate(d.getUTCDate() + Math.floor(s));
-    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  }
-  const str = String(s).trim();
-  // 民國 114/07/01 -> 2025/07/01
-  const roc = str.match(/^(\d{3})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
-  if (roc) {
-    const y = Number(roc[1]) + 1911;
-    return new Date(y, Number(roc[2]) - 1, Number(roc[3]));
-  }
-  const m = str.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  const d = new Date(str);
-  return isNaN(d) ? null : d;
-}
 
 function initStickyControls(){
   const sentinel = document.getElementById('stickySentinel');
