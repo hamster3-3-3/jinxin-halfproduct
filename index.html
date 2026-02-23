@@ -217,23 +217,23 @@
     <!-- KPI cards -->
     <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
       <div class="card p-4">
-        <div class="kpi-card-title">營業額（平均/日）</div>
+        <div class="kpi-card-title">營業額（加總）</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢額（平均/日）</div>
+        <div class="kpi-card-title">報廢額（加總）</div>
         <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢率（平均）</div>
+        <div class="kpi-card-title">報廢率（加總區間）</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用額（平均/日）</div>
+        <div class="kpi-card-title">超用額（加總）</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用率（平均）</div>
+        <div class="kpi-card-title">超用率（加總區間）</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
 </div>
     </div>
@@ -243,9 +243,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">廢棄前10名（平均/日）</div>
+            <div class="kpi-card-title">廢棄前10名（加總）</div>
             <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（平均）：<span id="topScrapShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比（加總區間）：<span id="topScrapShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -254,9 +254,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">超用前10名（平均/日）</div>
+            <div class="kpi-card-title">超用前10名（加總）</div>
             <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（平均）：<span id="topOverShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比（加總區間）：<span id="topOverShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -265,10 +265,10 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">共用類廢棄（平均/日）</div>
+            <div class="kpi-card-title">共用類廢棄（加總）</div>
             <div id="sharedAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1 flex items-center gap-2">
-              構成比（平均，KPI 15%）：<span id="sharedShare" class="mono">—</span>
+              構成比（加總區間，KPI 15%）：<span id="sharedShare" class="mono">—</span>
               <span id="sharedBadge" class="hidden"></span>
             </div>
           </div>
@@ -1503,36 +1503,36 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
 
 
 function updateKPICards(srows) {
-  const n = srows.length || 1;
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
-  const avgAmt = (k) => sum(k) / n;
-  const avgRate = (k) => sum(k) / n;
 
-  const sales = avgAmt('sales');
-  const scrapAmt = avgAmt('scrapAmt');
-  const scrapRate = avgRate('scrapRate');
-  const overAmt = avgAmt('overuseAmt');
-  const overRate = avgRate('overuseRate');
+  const totalSales = sum('sales');
+  const totalScrapAmt = sum('scrapAmt');
+  const totalOverAmt = sum('overuseAmt');
 
-  $('kpiSales').textContent = fmtMoney(sales);
-$('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
-$('kpiScrapRate').textContent = fmtPct(scrapRate);
-$('kpiOverAmt').textContent = fmtMoney(overAmt);
-$('kpiOverRate').textContent = fmtPct(overRate);
-// top cards
-  const topScrapAmt = avgAmt('topScrapAmt');
-  const topScrapShare = avgRate('topScrapShare');
-  $('topScrapAmt').textContent = fmtMoney(topScrapAmt);
+  // 以區間加總後重新計算「整段期間」的比率（避免直接加總每日百分比）
+  const scrapRate = (Number.isFinite(totalSales) && totalSales > 0) ? (totalScrapAmt / totalSales) : NaN;
+  const overRate  = (Number.isFinite(totalSales) && totalSales > 0) ? (totalOverAmt  / totalSales) : NaN;
+
+  $('kpiSales').textContent = fmtMoney(totalSales);
+  $('kpiScrapAmt').textContent = fmtMoney(totalScrapAmt);
+  $('kpiScrapRate').textContent = fmtPct(scrapRate);
+  $('kpiOverAmt').textContent = fmtMoney(totalOverAmt);
+  $('kpiOverRate').textContent = fmtPct(overRate);
+
+  // Top cards：金額用「加總」，構成比用「加總後再計算」(以分母加總權重)
+  const totalTopScrapAmt = sum('topScrapAmt');
+  const topScrapShare = (Number.isFinite(totalScrapAmt) && totalScrapAmt > 0) ? (totalTopScrapAmt / totalScrapAmt) : NaN;
+  $('topScrapAmt').textContent = fmtMoney(totalTopScrapAmt);
   $('topScrapShare').textContent = fmtPct(topScrapShare);
 
-  const topOverAmt = avgAmt('topOverAmt');
-  const topOverShare = avgRate('topOverShare');
-  $('topOverAmt').textContent = fmtMoney(topOverAmt);
+  const totalTopOverAmt = sum('topOverAmt');
+  const topOverShare = (Number.isFinite(totalOverAmt) && totalOverAmt > 0) ? (totalTopOverAmt / totalOverAmt) : NaN;
+  $('topOverAmt').textContent = fmtMoney(totalTopOverAmt);
   $('topOverShare').textContent = fmtPct(topOverShare);
 
-  const sharedAmt = avgAmt('sharedAmt');
-  const sharedShare = avgRate('sharedShare');
-  $('sharedAmt').textContent = fmtMoney(sharedAmt);
+  const totalSharedAmt = sum('sharedAmt');
+  const sharedShare = (Number.isFinite(totalScrapAmt) && totalScrapAmt > 0) ? (totalSharedAmt / totalScrapAmt) : NaN;
+  $('sharedAmt').textContent = fmtMoney(totalSharedAmt);
   $('sharedShare').textContent = fmtPct(sharedShare);
 
   const badge = $('sharedBadge');
@@ -1550,6 +1550,7 @@ $('kpiOverRate').textContent = fmtPct(overRate);
     badge.classList.add('hidden');
   }
 }
+
 
 function destroyChart(key) {
   const c = state.charts[key];
