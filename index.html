@@ -217,23 +217,23 @@
     <!-- KPI cards -->
     <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
       <div class="card p-4">
-        <div class="kpi-card-title">營業額（加總）</div>
+        <div class="kpi-card-title">營業額</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢額（加總）</div>
+        <div class="kpi-card-title">報廢額</div>
         <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢率（加總區間）</div>
+        <div class="kpi-card-title">報廢率</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用額（加總）</div>
+        <div class="kpi-card-title">超用額</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用率（加總區間）</div>
+        <div class="kpi-card-title">超用率</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
 </div>
     </div>
@@ -243,9 +243,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">廢棄前10名（加總）</div>
+            <div class="kpi-card-title">廢棄前10名</div>
             <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（加總區間）：<span id="topScrapShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比：<span id="topScrapShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -254,9 +254,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">超用前10名（加總）</div>
+            <div class="kpi-card-title">超用前10名</div>
             <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（加總區間）：<span id="topOverShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比：<span id="topOverShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -265,10 +265,10 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">共用類廢棄（加總）</div>
+            <div class="kpi-card-title">共用類廢棄</div>
             <div id="sharedAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1 flex items-center gap-2">
-              構成比（加總區間，KPI 15%）：<span id="sharedShare" class="mono">—</span>
+              構成比（KPI 15%）：<span id="sharedShare" class="mono">—</span>
               <span id="sharedBadge" class="hidden"></span>
             </div>
           </div>
@@ -1455,11 +1455,27 @@ function groupKeyByGran(dateStr, gran) {
 
 
 function aggregateSeries(rows, metric, gran, start = null, end = null) {
+  // KPI / 趨勢圖「加總」規則：
+  // - 金額類：bucket 內直接加總
+  // - 比率/構成比：bucket 內以「加總後重算」（避免直接平均每日百分比）
+  //   scrapRate = sum(scrapAmt)/sum(sales)
+  //   overuseRate = sum(overuseAmt)/sum(sales)
+  //   topScrapShare = sum(topScrapAmt)/sum(scrapAmt)
+  //   topOverShare  = sum(topOverAmt)/sum(overuseAmt)
+  //   sharedShare   = sum(sharedAmt)/sum(scrapAmt)
+
   const buckets = new Map();
 
   const hasRange = (start instanceof Date) && (end instanceof Date);
   const startT = hasRange ? start.getTime() : 0;
   const endT   = hasRange ? end.getTime() : 0;
+
+  const ensureBucket = (k) => {
+    if (!buckets.has(k)) {
+      buckets.set(k, { k, n: 0, sales: 0, scrapAmt: 0, overuseAmt: 0, topScrapAmt: 0, topOverAmt: 0, sharedAmt: 0 });
+    }
+    return buckets.get(k);
+  };
 
   for (const r of rows) {
     let k;
@@ -1477,13 +1493,17 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
       k = groupKeyByGran(r.date, gran);
     }
 
-    if (!buckets.has(k)) buckets.set(k, {k, n: 0, sum: 0});
-    const b = buckets.get(k);
+    const b = ensureBucket(k);
     b.n += 1;
-    b.sum += (Number(r[metric]) || 0);
+    b.sales     += (Number(r.sales) || 0);
+    b.scrapAmt  += (Number(r.scrapAmt) || 0);
+    b.overuseAmt+= (Number(r.overuseAmt) || 0);
+    b.topScrapAmt += (Number(r.topScrapAmt) || 0);
+    b.topOverAmt  += (Number(r.topOverAmt) || 0);
+    b.sharedAmt   += (Number(r.sharedAmt) || 0);
   }
 
-  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a,b));
+  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a, b));
 
   // 年別：固定顯示 1~12 月（即使某些月份無資料，也保留 x 軸刻度）
   if (gran === 'month' && state.mode === 'year' && hasRange) {
@@ -1491,16 +1511,56 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
   }
 
+  const labels = keys.map(k => {
+    if (gran === 'week') {
+      const ws = parseISO(k);
+      const we = new Date(ws.getTime());
+      we.setDate(we.getDate() + 6);
+      return `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
+    }
+    if (gran === 'month' && state.mode === 'year') {
+      const mm = Number(String(k).split('-')[1] || 0);
+      return mm ? `${mm}月` : k;
+    }
+    // day / month(range) / others：沿用原本短標籤
+    return shortLabel(k);
+  });
+
   const values = keys.map(k => {
     const b = buckets.get(k);
     if (!b) return null;
-    // rate/share：以平均呈現；金額/數量：同樣維持「平均/日」(bucket 內日平均)
-    return b.sum / Math.max(1, b.n);
+
+    // 金額類：加總
+    if (['sales','scrapAmt','overuseAmt','topScrapAmt','topOverAmt','sharedAmt'].includes(metric)) {
+      return Number(b[metric]) || 0;
+    }
+
+    // 比率/構成比：加總後重算（避免平均每日百分比）
+    if (metric === 'scrapRate') {
+      return (b.sales > 0) ? (b.scrapAmt / b.sales) : null;
+    }
+    if (metric === 'overuseRate') {
+      return (b.sales > 0) ? (b.overuseAmt / b.sales) : null;
+    }
+    if (metric === 'topScrapShare') {
+      return (b.scrapAmt > 0) ? (b.topScrapAmt / b.scrapAmt) : null;
+    }
+    if (metric === 'topOverShare') {
+      return (b.overuseAmt > 0) ? (b.topOverAmt / b.overuseAmt) : null;
+    }
+    if (metric === 'sharedShare') {
+      return (b.scrapAmt > 0) ? (b.sharedAmt / b.scrapAmt) : null;
+    }
+
+    // fallback：保留原本 bucket 內平均（主要給未來擴充欄位用）
+    // 注意：這裡用 metric 欄位本身的平均，若未提供則回 null
+    const v = Number(b[metric]);
+    if (Number.isFinite(v)) return v;
+    return null;
   });
 
-  return { labels: keys, values };
+  return { labels, values, keys };
 }
-
 
 function updateKPICards(srows) {
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
@@ -1648,7 +1708,7 @@ function renderKPIChart(srows, start, end) {
         x: {
           ticks: {
             callback: function(value) {
-              return shortLabel(this.getLabelForValue(value));
+              return this.getLabelForValue(value);
             }
           }
         },
@@ -1697,8 +1757,8 @@ function renderRightChart(srows, start, end) {
   const labels = s.labels;
   const bounds = computeBounds(s.values, meta.kind);
 
-  let dsLabel = title + (isShare ? '｜構成比（平均）' : '｜金額總計（平均/日）');
-  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)（平均）';
+  let dsLabel = title + (isShare ? '｜構成比' : '｜金額總計');
+  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)';
 
   const ctx = $('rightChart').getContext('2d');
   state.charts.right = new Chart(ctx, {
@@ -1731,7 +1791,7 @@ function renderRightChart(srows, start, end) {
         x: {
           ticks: {
             callback: function(value) {
-              return shortLabel(this.getLabelForValue(value));
+              return this.getLabelForValue(value);
             }
           }
         },
@@ -2079,7 +2139,8 @@ function renderItemChart(daily) {
     for (const r of parsed) {
       const ws = weekStartTue(r._d);
       const key = toISO(ws);
-      const label = fmtMMDD(ws);
+      const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
+      const label = `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
       const v = m.get(r);
       // 月別：金額/數量用「加總」，比率用「平均」
       addToBucket(key, ws, label, v);
