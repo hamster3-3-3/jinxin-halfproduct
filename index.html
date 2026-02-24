@@ -7,7 +7,9 @@
   <link rel="icon" href="data:," />
 
   <!-- Tailwind CSS (CDN) -->
-  <script src="https://cdn.tailwindcss.com">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+<script>
 // --- normalize helper (for fuzzy matching in Excel cells) ---
 function normKey(s){
   if (s == null) return "";
@@ -23,11 +25,20 @@ function cellMatchesAnyAlias(cellVal, aliases){
   for (const al of aliases){
     const b = normKey(al);
     if (!b) continue;
-    if (a === b || a.includes(b) || b.includes(a)) return true; // covers merged cells like "4取樣不穩"
+    if (a === b || a.includes(b) || b.includes(a)) return true;
   }
   return false;
 }
+function parseNumber(v){
+  if (v == null) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/,/g,"").trim();
+  if (!s) return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
 </script>
+
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap');
