@@ -393,8 +393,8 @@ function fallbackScanAmountRight(sheet, r, c){
             </div>
           </div>
           <div class="md:col-span-3 flex gap-2">
-            <button id="applyBtn" class="seg-btn w-full">套用</button>
-            <button id="todayBtn" class="seg-btn w-full">跳到最新日</button>
+            <button style="display:none"  id="applyBtn" class="seg-btn w-full">套用</button>
+            <button style="display:none"  id="todayBtn" class="seg-btn w-full">跳到最新日</button>
           </div>
         </div>
       </div>
@@ -2968,6 +2968,8 @@ function renderAll() {
 
 function renderKPIOnly() {
   if (!state.view) return renderAll();
+  bindAutoApply();
+  applySelectionFromUI();
   renderKPIChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
@@ -3518,7 +3520,7 @@ function openTop20ExpandForReason(reasonKey){
   } else {
     endISO = state.selection.end;
   }
-  state._top20Exp.prevMonthKey = endISO ? prevMonthKeyFromISO(endISO) : null;
+  state._top20Exp.prevMonthKey = (state.mode==='month' && endISO) ? prevMonthKeyFromISO(endISO) : null;
 
   const panel = $('top20Expand');
   if (!panel) return;
@@ -3592,6 +3594,69 @@ function renderTop20Expand(){
       <td class="py-2 pr-2 whitespace-nowrap">${dup}</td>
     `;
     tbody.appendChild(tr);
+  }
+}
+
+
+function applySelectionFromUI(){
+  // Sync state.selection from current UI controls and refresh views.
+  try{
+    const year = $('yearSel') ? $('yearSel').value : state.selection.year;
+    const month = $('monthSel') ? $('monthSel').value : state.selection.month;
+    state.selection.year = year;
+    state.selection.month = month;
+
+    if (state.mode === 'week'){
+      const v = $('weekSel') ? $('weekSel').value : '';
+      state.selection.weekStart = v;
+      state.selection.weekEnd = v;
+      // also set start/end for consistency
+      if (v && (v.includes('~') || v.includes('～'))){
+        const parts = v.split(/~|～/).map(x=>x.trim()).filter(Boolean);
+        state.selection.start = parts[0] || null;
+        state.selection.end = parts[1] || null;
+      } else if (v){
+        state.selection.start = v;
+        const ds = parseISO(v);
+        state.selection.end = (ds instanceof Date && !isNaN(ds)) ? toISO(addDays(ds,6)) : v;
+      }
+    } else if (state.mode === 'day'){
+      const v = $('daySel') ? $('daySel').value : '';
+      state.selection.start = v;
+      state.selection.end = v;
+    } else if (state.mode === 'range'){
+      const s = $('rangeStart') ? $('rangeStart').value : state.selection.start;
+      const e = $('rangeEnd') ? $('rangeEnd').value : state.selection.end;
+      state.selection.start = s;
+      state.selection.end = e;
+    } else if (state.mode === 'month'){
+      // month mode uses year/month only; but for cross-month weeks in charts, existing logic handles
+    } else if (state.mode === 'year'){
+      // year mode uses year only
+    }
+
+    // Re-render everything
+    renderAll();
+
+    // If Top20 panel is open, keep same reason & kind, just refresh its content for new selection
+    const panel = $('top20Expand');
+    if (panel && !panel.classList.contains('hidden') && state._top20Exp && state._top20Exp.reasonKey){
+      const keepKind = state._top20Exp.kind || 'scrap';
+      openTop20ExpandForReason(state._top20Exp.reasonKey);
+      state._top20Exp.kind = keepKind;
+      renderTop20Expand();
+    }
+  }catch(e){
+    console.error(e);
+  }
+}
+
+function bindAutoApply(){
+  const ids = ['yearSel','monthSel','weekSel','daySel','rangeStart','rangeEnd'];
+  for (const id of ids){
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('change', ()=>applySelectionFromUI());
   }
 }
 
