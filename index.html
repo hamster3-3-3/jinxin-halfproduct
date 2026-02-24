@@ -7,7 +7,27 @@
   <link rel="icon" href="data:," />
 
   <!-- Tailwind CSS (CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com">
+// --- normalize helper (for fuzzy matching in Excel cells) ---
+function normKey(s){
+  if (s == null) return "";
+  s = String(s);
+  s = s.replace(/\u3000/g, " ").trim();
+  s = s.replace(/\s+/g, "");
+  s = s.replace(/[\(\)（）\[\]【】「」『』:：,，．。.、~～\-—–_]/g, "");
+  return s;
+}
+function cellMatchesAnyAlias(cellVal, aliases){
+  const a = normKey(cellVal);
+  if (!a) return false;
+  for (const al of aliases){
+    const b = normKey(al);
+    if (!b) continue;
+    if (a === b || a.includes(b) || b.includes(a)) return true; // covers merged cells like "4取樣不穩"
+  }
+  return false;
+}
+</script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap');
@@ -22,6 +42,23 @@
       --danger:#dc2626;
       --ok:#16a34a;
     }
+function parseNumber(v){
+  if (v == null) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/,/g,"").trim();
+  if (!s) return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function fallbackScanAmountRight(sheet, r, c){
+  for (let dc=1; dc<=8; dc++){
+    const n = parseNumber(getCellValue(sheet, r, c+dc));
+    if (Number.isFinite(n) && n !== 0) return n;
+  }
+  return 0;
+}
+
+
     body {
       font-family: 'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
       background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
