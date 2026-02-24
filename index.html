@@ -770,6 +770,22 @@ const weekStartTue = (d) => {
   return new Date(z.getFullYear(), z.getMonth(), z.getDate() - diff);
 };
 
+
+// Date label helpers (global)
+const fmtMD = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+const fmtMMDD = (d) => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
+// For month mode charts: expand month range to whole weeks (Tue~Mon)
+function expandToWholeWeeks(startISO, endISO){
+  const sd = parseISO(startISO);
+  const ed = parseISO(endISO);
+  const ws = weekStartTue(sd);
+  const weStart = weekStartTue(ed);
+  const we = new Date(weStart.getTime()); we.setDate(we.getDate()+6);
+  return { start: toISO(ws), end: toISO(we) };
+}
+
+
 const parseMaybeDate = (v) => {
   if (!v) return null;
   if (v instanceof Date && !isNaN(v)) return v;
@@ -1483,10 +1499,10 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     if (gran === 'week') {
       const d = parseISO(r.date);
       const ws = weekStartTue(d); // 週二~週一
-      // 月別模式：只顯示「起始日在該月範圍內」的週別
+      // 月別模式：顯示「與該月區間有交集」的週別（跨月週也要納入）
       if (hasRange && state.mode === 'month') {
-        const t = ws.getTime();
-        if (t < startT || t > endT) continue;
+        const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
+        if (we.getTime() < startT || ws.getTime() > endT) continue;
       }
       k = toISO(ws);
     } else {
@@ -1809,7 +1825,7 @@ function renderRightChart(srows, start, end) {
 
 function aggregateGroups(drows) {
   const map = new Map();
-  for (const r of drows) {
+  for (const r of drowsChart) {
     const key = r.product + '||' + r.semi;
     if (!map.has(key)) {
       map.set(key, {
@@ -1948,29 +1964,41 @@ function renderSuggest(containerId, items, onClick) {
 
 function getSelectedRangeRows() {
   const {start, end} = getDateRange();
+
+  // Cards / tables use the strict selected range
   const srows = filterByRange(state.summary, start, end);
   const drows = filterByRange(state.details, start, end);
-  return {start, end, srows, drows};
+
+  // Charts (month mode): include cross-month days for weeks that intersect the month
+  let srowsChart = srows;
+  let drowsChart = drows;
+  if (state.mode === 'month') {
+    const ex = expandToWholeWeeks(start, end);
+    srowsChart = filterByRange(state.summary, ex.start, ex.end);
+    drowsChart = filterByRange(state.details, ex.start, ex.end);
+  }
+
+  return {start, end, srows, drows, srowsChart, drowsChart};
 }
 
 function renderAll() {
-  const { start, end, srows, drows } = getSelectedRangeRows();
-  state.view = { start, end, srows, drows };
+  const { start, end, srows, drows, srowsChart, drowsChart } = getSelectedRangeRows();
+  state.view = { start, end, srows, drows, srowsChart, drowsChart };
 
   updateKPICards(srows);
-  renderKPIChart(srows, start, end);
-  renderRightChart(srows, start, end);
-  applyGroupFilterAndRender(drows);
+  renderKPIChart(srowsChart, start, end);
+  renderRightChart(srowsChart, start, end);
+  applyGroupFilterAndRender(drowsChart);
 }
 
 function renderKPIOnly() {
   if (!state.view) return renderAll();
-  renderKPIChart(state.view.srows, state.view.start, state.view.end);
+  renderKPIChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
 function renderRightOnly() {
   if (!state.view) return renderAll();
-  renderRightChart(state.view.srows, state.view.start, state.view.end);
+  renderRightChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
 
@@ -1982,8 +2010,23 @@ function renderSelectedItem() {
     return;
   }
   const {start, end} = getDateRange();
-  const drows = filterByRange(state.details, start, end).filter(r => (r.product + '||' + r.semi) === state.selectedKey);
-  if (!drows.length) {
+
+  // 月別：趨勢圖需納入跨月週（只要週區間與該月有交集，就計入整週資料）
+  let chartStart = start, chartEnd = end;
+  if (state.mode === 'month') {
+    const ex = expandToWholeWeeks(start, end);
+    chartStart = ex.start;
+    chartEnd = ex.end;
+  }
+
+  // 表格：維持嚴格月份區間
+  const drowsBase = filterByRange(state.details, start, end)
+    .filter(r => (r.product + '||' + r.semi) === state.selectedKey);
+
+  // 趨勢圖：使用擴展後區間
+  const drowsChart = filterByRange(state.details, chartStart, chartEnd)
+    .filter(r => (r.product + '||' + r.semi) === state.selectedKey);
+  if (!drowsBase.length && !drowsChart.length) {
     $('itemPanel').classList.add('hidden');
     return;
   }
@@ -2020,15 +2063,48 @@ function renderSelectedItem() {
   }
   state.selectedDaily = daily;
 
+  // base daily for table (strict selected range)
+  const mBase = new Map();
+  for (const r of drowsBase) {
+    if (!mBase.has(r.date)) mBase.set(r.date, {
+      date: r.date,
+      product: r.product,
+      semi: r.semi,
+      order: 0, output: 0, refill: 0,
+      priceSum: 0, priceN: 0,
+      diffQty: 0, diffAmt: 0,
+      scrapQty: 0, scrapAmt: 0,
+      overuseAmt: 0
+    });
+    const o = mBase.get(r.date);
+    o.order += Number(r.order)||0;
+    o.output += Number(r.output)||0;
+    o.refill += Number(r.refill)||0;
+    if (Number.isFinite(r.price) && r.price>0) { o.priceSum += r.price; o.priceN += 1; }
+    o.diffQty += Number(r.diffQty)||0;
+    o.diffAmt += Number(r.diffAmt)||0;
+    o.scrapQty += Number(r.scrapQty)||0;
+    o.scrapAmt += Number(r.scrapAmt)||0;
+    o.overuseAmt += Number(r.overuseAmt)||0;
+  }
+  const dailyBase = Array.from(mBase.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+  for (const o of dailyBase) {
+    o.price = o.priceN ? (o.priceSum / o.priceN) : null;
+    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.overuseQty = (o.price && o.price>0) ? (o.overuseAmt / o.price) : null;
+  }
+
+
   const title = daily[0].product + '｜' + daily[0].semi;
   $('itemTitle').textContent = `${title}（${start} ～ ${end}）`;
   $('itemPanel').classList.remove('hidden');
 
   renderItemChart(daily);
-  renderDetailTable(daily);
+  renderDetailTable(dailyBase.length ? dailyBase : daily);
 }
 
 function renderItemChart(daily) {
+
   destroyChart('item');
 
   const metric = state.itemMetricSelected || 'diffAmt';
@@ -2138,8 +2214,10 @@ function renderItemChart(daily) {
   } else if (mode === 'month') {
     for (const r of parsed) {
       const ws = weekStartTue(r._d);
-      const key = toISO(ws);
       const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
+      // 只顯示與該月有交集的週（跨月週也要納入）
+      if (we < monthStart || ws > monthEnd) continue;
+      const key = toISO(ws);
       const label = `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
       const v = m.get(r);
       // 月別：金額/數量用「加總」，比率用「平均」
