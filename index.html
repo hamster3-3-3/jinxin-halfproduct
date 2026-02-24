@@ -37,6 +37,19 @@ function parseNumber(v){
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
 }
+
+
+function addDays(d, n){
+  const x = new Date(d.getTime());
+  x.setDate(x.getDate() + Number(n||0));
+  return x;
+}
+function monthKeyFromISO(iso){
+  const d = parseISO(iso);
+  if (!(d instanceof Date) || isNaN(d)) return null;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+
 </script>
 
 
@@ -1238,7 +1251,7 @@ function openTop20ModalForReason(reasonKey){
   const endISO = (selEnd instanceof Date && !isNaN(selEnd)) ? toISO(selEnd) : (state.selection.end || toISO(new Date()));
   const monthKey = (state.mode==='month')
     ? (String(state.selection.year) + '-' + String(state.selection.month).padStart(2,'0'))
-    : inferMonthKeyFromFileName(endISO); // fallback
+    : monthKeyFromISO(endISO) || inferMonthKeyFromFileName(endISO); // fallback
 
   state._top20Modal.monthKey = monthKey;
   state._top20Modal.prevMonthKey = prevMonthKeyFromISO(endISO);
