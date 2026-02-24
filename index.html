@@ -195,18 +195,25 @@ function entryEndBeforeISO(entry, cutoffISO){
   return d.end < cutoff;
 }
 
-function makeTop20DupSetBefore(kind, cutoffStartISO){
-  // Any appearance BEFORE the selected range start counts as duplicate.
-  const s = new Set();
-  if (!cutoffStartISO) return s;
+
+function makeTop20DupCountBefore(kind, cutoffStartISO){
+  // Count appearances BEFORE the selected range start (dedup by rangeKey).
+  const tmp = new Map(); // key -> Set(rangeKey)
+  if (!cutoffStartISO) return new Map();
   for (const r of (state.top20Entries||[])){
     if (r.kind !== kind) continue;
     if (!entryEndBeforeISO(r, cutoffStartISO)) continue;
     const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
-    s.add(k);
+    if (!tmp.has(k)) tmp.set(k, new Set());
+    tmp.get(k).add(r.rangeKey || r.monthKey || '');
   }
-  return s;
+  const out = new Map();
+  for (const [k, setv] of tmp.entries()){
+    out.set(k, setv.size);
+  }
+  return out;
 }
+
 
 function addDays(d, n){
   const x = new Date(d.getTime());
@@ -3593,6 +3600,30 @@ function openTop20ExpandForReason(reasonKey){
   panel.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
+
+function jumpToItemFromTop20(prod, semi){
+  try{
+    prod = safeStr(prod).trim();
+    semi = safeStr(semi).trim();
+    // put keywords into the half-product search so the row appears and selection won't be cleared
+    if ($('productSearch')) $('productSearch').value = prod;
+    if ($('semiSearch')) $('semiSearch').value = semi;
+
+    const {start, end} = getDateRange();
+    const drows = filterByRange(state.details, start, end);
+    applyGroupFilterAndRender(drows);
+
+    // set selected key and render item panel
+    state.selectedKey = (prod + '||' + semi);
+    renderSelectedItem();
+
+    const panel = $('itemPanel');
+    if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+  }catch(e){
+    console.error(e);
+  }
+}
+
 function renderTop20Expand(){
   const st = state._top20Exp;
   if (!st) return;
@@ -3620,9 +3651,8 @@ function renderTop20Expand(){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
-  const dupSet = makeTop20DupSetBefore(kind, st.cutoffStartISO);
-
-  const tbody = $('top20ExpBody');
+  const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO);
+const tbody = $('top20ExpBody');
   tbody.innerHTML = '';
   if (!rows.length){
     $('top20ExpEmpty').classList.remove('hidden');
@@ -3633,17 +3663,24 @@ function renderTop20Expand(){
   rows.sort((a,b)=>(b.amt||0)-(a.amt||0));
   for (const r of rows){
     const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
-    const dup = dupSet.has(k) ? '是' : '否';
+    const cnt = dupCount.get(k) || 0;
+    const dup = cnt > 0 ? (`是，${cnt}次`) : '否';
     const tr = document.createElement('tr');
     tr.className='border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.product)}</td>
-      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.semi)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.product)}</button></td>
+      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.semi)}</button></td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
       <td class="py-2 pr-2 whitespace-nowrap">${dup}</td>
     `;
+    for (const b of tr.querySelectorAll('.js-jump')){
+      b.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        jumpToItemFromTop20(b.dataset.prod || '', b.dataset.semi || '');
+      });
+    }
     tbody.appendChild(tr);
   }
 }
