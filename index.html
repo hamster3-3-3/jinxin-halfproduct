@@ -41,6 +41,17 @@ function parseNumber(v){
 
 
 
+
+
+function fmtCurrency(n){
+  const v = Number(n||0);
+  try{
+    return 'NT$ ' + v.toLocaleString('en-US', {maximumFractionDigits:0});
+  }catch(e){
+    return 'NT$ ' + String(Math.round(v));
+  }
+}
+
 function normDigits(s){ return String(s||'').replace(/\D/g,''); }
 function rangeKeyFromMonthCell(v){
   const dig = normDigits(v);
