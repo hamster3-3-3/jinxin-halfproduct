@@ -2381,6 +2381,26 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
 }
 
 
+function bindReasonCardClicks(){
+  const wrap = $('reasonCards');
+  if (!wrap) return;
+  const cards = wrap.querySelectorAll('.card');
+  for (const card of cards){
+    // only bind once
+    if (card.__boundReasonClick) continue;
+    const titleEl = card.querySelector('.kpi-card-title');
+    if (!titleEl) continue;
+    const key = titleEl.textContent.trim();
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', (e)=>{
+      // ignore clicks on inner controls (none currently)
+      openTop20ModalForReason(key);
+    });
+    card.__boundReasonClick = true;
+  }
+}
+
+
 function renderKPIChart(srows, start, end) {
   const gran = aggGranularity(start, end);
 
@@ -2708,6 +2728,7 @@ function renderAll() {
 
   updateKPICards(srows);
   renderReasonCards(start, end);
+  bindReasonCardClicks();
   renderKPIChart(srowsChart, start, end);
   renderRightChart(srowsChart, start, end);
   applyGroupFilterAndRender(drowsChart);
