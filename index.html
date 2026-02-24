@@ -579,7 +579,9 @@ const state = {
     item: null
   },
   _groupRangeKey: null,
-  reasonWeeks: []
+  reasonWeeks: [],
+  top20Entries: []
+
 };
 const $ = (id) => document.getElementById(id);
 const toast = (msg) => {
@@ -1090,6 +1092,217 @@ function parseSummaryFromWB(wb, fileName) {
   return out;
 }
 
+
+
+// ===== Top20 (原因別分析) parsing =====
+function findTop20SheetName(wb, kind){ // kind: 'scrap'|'over'
+  const wantA = (kind==='scrap') ? '報廢20大' : '超用20大';
+  const wantB = '原因別分析';
+  // tolerate dash variants: － — - 全形
+  for (const n of wb.SheetNames){
+    const t = normCell(n);
+    if (!t) continue;
+    if (t.includes(normKey(wantA)) && t.includes(normKey(wantB))) return n;
+  }
+  // fallback: contains 報廢20大 / 超用20大 only
+  for (const n of wb.SheetNames){
+    const t = normCell(n);
+    if (!t) continue;
+    if (t.includes(normKey(wantA))) return n;
+  }
+  return null;
+}
+
+function inferMonthKeyFromFileName(fileName){
+  const s = safeStr(fileName);
+  // patterns: 2026.01 , 2026.02 , 2026-02 , 202602
+  let m = s.match(/(20\d{2})[.\-_/](\d{1,2})/);
+  if (m) return m[1] + '-' + String(Number(m[2])).padStart(2,'0');
+  m = s.match(/(20\d{2})(\d{2})/);
+  if (m) return m[1] + '-' + m[2];
+  // fallback: use first 20xx and month 01
+  const y = (s.match(/(20\d{2})/)||[])[1];
+  return y ? (y+'-01') : null;
+}
+
+function parseTop20FromWB(wb, fileName){
+  const monthKey = inferMonthKeyFromFileName(fileName);
+  const out = [];
+  for (const kind of ['scrap','over']){
+    const sname = findTop20SheetName(wb, kind);
+    if (!sname) continue;
+    const ws = wb.Sheets[sname];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    if (!rows || !rows.length) continue;
+
+    // locate header row by finding cells containing 商品名 and 分析原因
+    let hdrR = -1;
+    for (let r=0; r<Math.min(rows.length, 40); r++){
+      const row = rows[r]||[];
+      const line = row.map(v=>normCell(v)).join('|');
+      if (line.includes('商品名') && (line.includes('分析原因') || line.includes('原因'))) { hdrR = r; break; }
+    }
+    if (hdrR < 0) continue;
+
+    const header = rows[hdrR]||[];
+    const col = (nameList)=>{
+      for (let c=0;c<header.length;c++){
+        const h = normCell(header[c]);
+        if (!h) continue;
+        for (const n of nameList){
+          if (h.includes(normKey(n))) return c;
+        }
+      }
+      return -1;
+    };
+
+    const cProd = col(['商品名','商品']);
+    const cSemi = col(['半成品名','半成品','名稱']);
+    const cReason = col(['分析原因','原因']);
+    const cDesc = col(['原因說明','說明','原因描述']);
+    const cAct  = col(['後續對策','對策','改善','改善對策']);
+    const cAmt  = (kind==='scrap')
+      ? col(['報廢金額','報廢(元)','報廢金額(元)','金額'])
+      : col(['超用金額','超用(元)','超用金額(元)','金額']);
+
+    for (let r=hdrR+1; r<rows.length; r++){
+      const row = rows[r]||[];
+      // stop when empty
+      const prod = safeStr(row[cProd]).trim();
+      const semi = safeStr(row[cSemi]).trim();
+      if (!prod && !semi) continue;
+
+      const reason = safeStr(row[cReason]).trim();
+      const amt = asNumber(row[cAmt]);
+      const desc = safeStr(row[cDesc]).trim();
+      const act  = safeStr(row[cAct]).trim();
+
+      out.push({
+        kind, monthKey,
+        reason,
+        product: prod,
+        semi: semi,
+        amt: Number.isFinite(amt)? amt : 0,
+        desc, act,
+        source: safeStr(fileName)
+      });
+    }
+  }
+  return out;
+}
+
+// return previous-month key based on a date
+function prevMonthKeyFromISO(endISO){
+  const d = parseISO(endISO);
+  if (!(d instanceof Date) || isNaN(d)) return null;
+  const y = d.getFullYear();
+  const m = d.getMonth(); // 0..11
+  const pm = new Date(y, m-1, 1);
+  return pm.getFullYear() + '-' + String(pm.getMonth()+1).padStart(2,'0');
+}
+
+function makeTop20DupSet(monthKey, kind){
+  const s = new Set();
+  for (const r of (state.top20Entries||[])){
+    if (r.kind !== kind) continue;
+    if (r.monthKey !== monthKey) continue;
+    const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
+    s.add(k);
+  }
+  return s;
+}
+
+// UI: open modal for a reason
+function openTop20ModalForReason(reasonKey){
+  const modal = $('top20Modal');
+  if (!modal) return;
+  state._top20Modal = state._top20Modal || { reasonKey, kind:'scrap' };
+  state._top20Modal.reasonKey = reasonKey;
+  state._top20Modal.kind = 'scrap';
+
+  // monthKey = month of selection end (week/day/range) or selected month
+  const selEnd = (state.mode==='month')
+    ? toISO(new Date(Number(state.selection.year), Number(state.selection.month)-1, 1 + (new Date(Number(state.selection.year), Number(state.selection.month), 0)).getDate()-1))
+    : (state.selection.end || state.selection.weekStart ? addDays(parseISO(state.selection.weekStart||state.selection.end), 6) : parseISO(state.selection.end||toISO(new Date())));
+  const endISO = (selEnd instanceof Date && !isNaN(selEnd)) ? toISO(selEnd) : (state.selection.end || toISO(new Date()));
+  const monthKey = (state.mode==='month')
+    ? (String(state.selection.year) + '-' + String(state.selection.month).padStart(2,'0'))
+    : inferMonthKeyFromFileName(endISO); // fallback
+
+  state._top20Modal.monthKey = monthKey;
+  state._top20Modal.prevMonthKey = prevMonthKeyFromISO(endISO);
+
+  $('top20Title').textContent = `前二十大原因｜${reasonKey}`;
+  $('top20Subtitle').textContent = `月份：${monthKey}（重複判定比對：${state._top20Modal.prevMonthKey || '-'}）`;
+
+  // tab styles
+  $('top20TabScrap').onclick = () => { state._top20Modal.kind='scrap'; renderTop20Modal(); };
+  $('top20TabOver').onclick  = () => { state._top20Modal.kind='over';  renderTop20Modal(); };
+  $('top20Close').onclick = closeTop20Modal;
+  modal.classList.remove('hidden');
+
+  renderTop20Modal();
+}
+
+function closeTop20Modal(){
+  const modal = $('top20Modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+
+// close modal on backdrop click
+document.addEventListener('click', (e)=>{
+  const m = $('top20Modal');
+  if (!m || m.classList.contains('hidden')) return;
+  if (e.target === m.firstElementChild) closeTop20Modal();
+});
+function renderTop20Modal(){
+  const st = state._top20Modal;
+  if (!st) return;
+  const kind = st.kind;
+  const reasonKey = st.reasonKey;
+  const monthKey = st.monthKey;
+  const prevKey = st.prevMonthKey;
+
+  // update tab styles and header label
+  const bS = $('top20TabScrap'), bO = $('top20TabOver');
+  if (kind==='scrap'){ bS.className='px-3 py-1 rounded-full bg-slate-900 text-white'; bO.className='px-3 py-1 rounded-full text-slate-700 hover:bg-white'; $('top20AmtHeader').textContent='報廢金額'; }
+  else { bO.className='px-3 py-1 rounded-full bg-slate-900 text-white'; bS.className='px-3 py-1 rounded-full text-slate-700 hover:bg-white'; $('top20AmtHeader').textContent='超用金額'; }
+
+  const rows = (state.top20Entries||[]).filter(r => r.kind===kind && r.monthKey===monthKey && normKey(r.reason)===normKey(reasonKey));
+  const dupSet = prevKey ? makeTop20DupSet(prevKey, kind) : new Set();
+
+  const tbody = $('top20Body');
+  tbody.innerHTML = '';
+  if (!rows.length){
+    $('top20Empty').classList.remove('hidden');
+    return;
+  }
+  $('top20Empty').classList.add('hidden');
+
+  // sort by amount desc
+  rows.sort((a,b)=>(b.amt||0)-(a.amt||0));
+  for (const r of rows){
+    const k = normKey(r.product)+'|'+normKey(r.semi)+'|'+normKey(r.reason);
+    const dup = dupSet.has(k) ? '是' : '否';
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-slate-100 hover:bg-slate-50';
+    tr.innerHTML = `
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.product)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.semi)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
+      <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
+      <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
+      <td class="py-2 pr-2 whitespace-nowrap">${dup}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function escapeHTML(s){
+  return String(s||'').replace(/[&<>"']/g, (m)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+}
+
 function parseDetailsFromWB(wb, fileNameOrMeta) {
   const out = [];
 
@@ -1576,6 +1789,7 @@ async function loadAllData() {
   let sum = [];
   let det = [];
   let reasons = [];
+  let top20 = [];
   for (const f of files) {
     const url = './data/' + encodePath(f);
     const r = await fetch(url, {cache:'no-store'});
@@ -1585,6 +1799,7 @@ async function loadAllData() {
     sum = sum.concat(parseSummaryFromWB(wb, f));
     det = det.concat(parseDetailsFromWB(wb, f));
     reasons = reasons.concat(parseReasonFromWB(wb, f));
+    top20 = top20.concat(parseTop20FromWB(wb, f));
   }
 
   // dedupe summary by date (keep last)
@@ -3033,6 +3248,48 @@ async function init(force=false) {
 
 init();
 </script>
+
+
+<!-- Top20 Modal -->
+<div id="top20Modal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40"></div>
+  <div class="absolute inset-0 flex items-start justify-center p-4 sm:p-8 overflow-auto">
+    <div class="w-full max-w-6xl bg-white rounded-2xl shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+        <div>
+          <div class="text-lg font-semibold text-slate-900" id="top20Title">前二十大原因明細</div>
+          <div class="text-sm text-slate-500" id="top20Subtitle"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+            <button id="top20TabScrap" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+            <button id="top20TabOver"  class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          </div>
+          <button id="top20Close" class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">關閉</button>
+        </div>
+      </div>
+
+      <div class="px-5 py-4">
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-600 border-b border-slate-200">
+                <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
+                <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
+                <th class="py-2 pr-4 whitespace-nowrap" id="top20AmtHeader">報廢金額</th>
+                <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
+                <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
+                <th class="py-2 pr-2 whitespace-nowrap">重複20大</th>
+              </tr>
+            </thead>
+            <tbody id="top20Body" class="text-slate-800"></tbody>
+          </table>
+        </div>
+        <div id="top20Empty" class="hidden text-slate-500 text-sm py-6">此條件下無符合資料。</div>
+      </div>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
