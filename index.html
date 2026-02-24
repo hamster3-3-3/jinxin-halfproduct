@@ -1825,7 +1825,7 @@ function renderRightChart(srows, start, end) {
 
 function aggregateGroups(drows) {
   const map = new Map();
-  for (const r of drows) {
+  for (const r of drowsChart) {
     const key = r.product + '||' + r.semi;
     if (!map.has(key)) {
       map.set(key, {
@@ -2033,7 +2033,7 @@ function renderSelectedItem() {
 
   // aggregate by date
   const m = new Map();
-  for (const r of drows) {
+  for (const r of drowsChart) {
     if (!m.has(r.date)) m.set(r.date, {
       date: r.date,
       product: r.product,
