@@ -1450,32 +1450,43 @@ function parseReasonFromWB(wb, fileName){
         const p = pos[def.key];
         if (!p) continue;
 
-        // In the Excel, header spans two cols (金額/比例). We want 金額.
-        // Try to align to a nearby '金額' cell on same row or next 2 rows.
-        let amtC = p.c;
-        for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+3); rr++){
-          const row = rows[rr]||[];
-          const cStart = Math.max(0, p.c-3);
-          const cEnd = Math.min(row.length-1, p.c+6);
-          for (let cc=cStart; cc<=cEnd; cc++){
-            if (normCell(row[cc])==='金額'){ amtC = cc; break; }
-          }
-        }
+        // In the Excel, each reason block has its own 「金額 / 比例」 header.
+// We choose the nearest 「金額」 cell around the reason title so columns won't get cross-wired (top vs bottom row blocks).
+let amtC = p.c;
+{
+  let best = null; // {rr, cc, score}
+  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+4); rr++){
+    const row = rows[rr]||[];
+    const cStart = Math.max(0, p.c-8);
+    const cEnd = Math.min(row.length-1, p.c+10);
+    for (let cc=cStart; cc<=cEnd; cc++){
+      if (normCell(row[cc])==='金額'){
+        const score = Math.abs(cc - p.c) + Math.abs(rr - p.r) * 0.25;
+        if (!best || score < best.score) best = {rr, cc, score};
+      }
+    }
+  }
+  if (best) amtC = best.cc;
+}
 
-        // Find nearest 報廢/超用 rows within this mini-table (below header)
-        let scrapRowL = -1, overRowL = -1;
-        for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+10); rr++){
-          const row = rows[rr]||[];
-          const cells = row.map(normCell);
-          if (scrapRowL<0 && cells.includes('報廢')) scrapRowL = rr;
-          if (overRowL<0 && cells.includes('超用')) overRowL = rr;
-          if (scrapRowL>=0 && overRowL>=0) break;
-        }
+// Find nearest 報廢/超用 rows within this mini-table (below header).
+// IMPORTANT: we search rows below the reason title and then read the amount from the chosen amtC column.
+let scrapRowL = -1, overRowL = -1;
+for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+12); rr++){
+  const row = rows[rr]||[];
+  for (let cc=Math.max(0, amtC-6); cc<=Math.min(row.length-1, amtC); cc++){
+    const v = normCell(row[cc]);
+    if (!v) continue;
+    if (scrapRowL<0 && v==='報廢') scrapRowL = rr;
+    if (overRowL<0 && v==='超用') overRowL = rr;
+  }
+  if (scrapRowL>=0 && overRowL>=0) break;
+}
 
-        const scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 3) : 0;
-        const overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 3) : 0;
+const scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 3) : 0;
+const overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 3) : 0;
 
-        out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
+out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
       }
     }
   }
