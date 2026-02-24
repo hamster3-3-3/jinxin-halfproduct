@@ -1445,16 +1445,6 @@ function parseReasonFromWB(wb, fileName){
         }
       }
 
-      // determine rows containing 報廢/超用 near the section
-      let scrapRow = -1, overRow = -1;
-      for (let rr=r0; rr<Math.min(rows.length, r0+80); rr++){
-        const row = rows[rr]||[];
-        const joined = row.slice(0,10).map(normCell).join('|');
-        if (scrapRow<0 && joined.includes('報廢')) scrapRow = rr;
-        if (overRow<0 && joined.includes('超用')) overRow = rr;
-        if (scrapRow>=0 && overRow>=0) break;
-      }
-
       // For each reason: pick amount cell
       for (const def of REASON_DEFS){
         const p = pos[def.key];
@@ -1463,16 +1453,27 @@ function parseReasonFromWB(wb, fileName){
         // In the Excel, header spans two cols (金額/比例). We want 金額.
         // Try to align to a nearby '金額' cell on same row or next 2 rows.
         let amtC = p.c;
-        for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+2); rr++){
+        for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+3); rr++){
           const row = rows[rr]||[];
-          for (let cc=p.c; cc<=Math.min(row.length-1, p.c+3); cc++){
+          const cStart = Math.max(0, p.c-3);
+          const cEnd = Math.min(row.length-1, p.c+6);
+          for (let cc=cStart; cc<=cEnd; cc++){
             if (normCell(row[cc])==='金額'){ amtC = cc; break; }
           }
         }
 
-        // If cannot find explicit 金額 header, assume amount is at p.c or p.c+1
-        const scrapAmt = (scrapRow>=0) ? firstNumberRight(scrapRow, amtC, 3) : 0;
-        const overuseAmt = (overRow>=0) ? firstNumberRight(overRow, amtC, 3) : 0;
+        // Find nearest 報廢/超用 rows within this mini-table (below header)
+        let scrapRowL = -1, overRowL = -1;
+        for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+10); rr++){
+          const row = rows[rr]||[];
+          const cells = row.map(normCell);
+          if (scrapRowL<0 && cells.includes('報廢')) scrapRowL = rr;
+          if (overRowL<0 && cells.includes('超用')) overRowL = rr;
+          if (scrapRowL>=0 && overRowL>=0) break;
+        }
+
+        const scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 3) : 0;
+        const overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 3) : 0;
 
         out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
       }
