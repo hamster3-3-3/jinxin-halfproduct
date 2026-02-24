@@ -1941,30 +1941,112 @@ function computeBounds(values, kind) {
 
 
 
+
 function renderReasonCards(rangeStartISO, rangeEndISO){
-  let s = rangeStartISO;
-  let e = rangeEndISO;
-  // 月別：納入跨月週（只要週區間與該月有交集，就計入整週）
-  if (state.mode === 'month') {
-    const ex = expandToWholeWeeks(rangeStartISO, rangeEndISO);
-    s = ex.start; e = ex.end;
-  }
-  const sd = parseISO(s);
-  const ed = parseISO(e);
+  const selStart = rangeStartISO;
+  const selEnd   = rangeEndISO;
 
   const sums = {};
   for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-  if (Array.isArray(state.reasonWeeks) && state.reasonWeeks.length && sd && ed) {
-    for (const r of state.reasonWeeks) {
-      const ws = parseISO(r.start);
-      const we = parseISO(r.end);
-      if (!ws || !we) continue;
-      if (ws > ed || we < sd) continue;
-      if (!(r.reason in sums)) continue;
-      sums[r.reason].scrap += Number(r.scrapAmt) || 0;
-      sums[r.reason].over  += Number(r.overuseAmt) || 0;
+  const entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
+
+  const parseD = (iso) => {
+    const d = parseISO(iso);
+    return (d instanceof Date && !isNaN(d)) ? d : null;
+  };
+  const spanDays = (sISO, eISO) => {
+    const s = parseD(sISO), e = parseD(eISO);
+    if (!s || !e) return Infinity;
+    return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
+  };
+  const overlaps = (s1ISO, e1ISO, s2ISO, e2ISO) => {
+    const s1 = parseD(s1ISO), e1 = parseD(e1ISO), s2 = parseD(s2ISO), e2 = parseD(e2ISO);
+    if (!s1 || !e1 || !s2 || !e2) return false;
+    return !(s2 > e1 || e2 < s1);
+  };
+  const covers = (sBigISO, eBigISO, sSmallISO, eSmallISO) => {
+    const sb = parseD(sBigISO), eb = parseD(eBigISO), ss = parseD(sSmallISO), es = parseD(eSmallISO);
+    if (!sb || !eb || !ss || !es) return false;
+    return (sb <= ss) && (eb >= es);
+  };
+
+  const exactEntries = (sISO, eISO) => entries.filter(r => r.start === sISO && r.end === eISO);
+
+  // Pick a single (start,end) range among candidates by: smallest spanDays, then latest end date.
+  const pickBestRange = (cands) => {
+    const byRange = new Map(); // key -> {start,end,span,endT}
+    for (const r of cands) {
+      const key = r.start + '|' + r.end;
+      if (byRange.has(key)) continue;
+      const sp = spanDays(r.start, r.end);
+      const et = parseD(r.end)?.getTime() || 0;
+      byRange.set(key, {start:r.start, end:r.end, span:sp, endT:et});
     }
+    let best = null;
+    for (const it of byRange.values()) {
+      if (!best || it.span < best.span || (it.span === best.span && it.endT > best.endT)) best = it;
+    }
+    return best;
+  };
+
+  const pickSmallestOverlapRange = (sISO, eISO) => {
+    const cands = entries.filter(r => overlaps(sISO, eISO, r.start, r.end));
+    const best = pickBestRange(cands);
+    return best ? exactEntries(best.start, best.end) : [];
+  };
+
+  const pickSmallestCoverRange = (sISO, eISO) => {
+    const cands = entries.filter(r => covers(r.start, r.end, sISO, eISO));
+    const best = pickBestRange(cands);
+    return best ? exactEntries(best.start, best.end) : [];
+  };
+
+  // Decide which entries to use based on mode:
+  // - week: use exact week range if exists; else pick smallest overlapping range (prefer week over month)
+  // - month: prefer exact month range in that month's workbook; else smallest covering range; else sum weekly ranges overlapping month (span<=10)
+  // - year: prefer month ranges; else sum weekly ranges in year (span<=10) without double counting
+  // - others: pick smallest overlapping range
+  let picked = [];
+
+  if (entries.length) {
+    if (state.mode === 'week') {
+      picked = exactEntries(selStart, selEnd);
+      if (!picked.length) picked = pickSmallestOverlapRange(selStart, selEnd);
+    } else if (state.mode === 'month') {
+      picked = exactEntries(selStart, selEnd);
+      if (!picked.length) picked = pickSmallestCoverRange(selStart, selEnd);
+      if (!picked.length) {
+        // fallback: sum weekly blocks in month (including cross-month weeks), exclude month-size blocks
+        picked = entries.filter(r => overlaps(selStart, selEnd, r.start, r.end) && spanDays(r.start, r.end) <= 10);
+      }
+    } else if (state.mode === 'year') {
+      const y = String(selStart).slice(0,4);
+      const used = new Set(); // start|end|reason
+      for (let m=1; m<=12; m++){
+        const mm = String(m).padStart(2,'0');
+        const ms = `${y}-${mm}-01`;
+        const me = toISO(new Date(Number(y), m, 0));
+        let part = exactEntries(ms, me);
+        if (!part.length) {
+          part = entries.filter(r => overlaps(ms, me, r.start, r.end) && spanDays(r.start, r.end) <= 10);
+        }
+        for (const r of part) {
+          const k = r.start + '|' + r.end + '|' + r.reason;
+          if (used.has(k)) continue;
+          used.add(k);
+          picked.push(r);
+        }
+      }
+    } else {
+      picked = pickSmallestOverlapRange(selStart, selEnd);
+    }
+  }
+
+  for (const r of picked) {
+    if (!(r.reason in sums)) continue;
+    sums[r.reason].scrap += Number(r.scrapAmt) || 0;
+    sums[r.reason].over  += Number(r.overuseAmt) || 0;
   }
 
   const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
@@ -2013,6 +2095,7 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
   set('r_retention_scrap_pct', pctOrDash(sums.retention.scrap, totalScrap));
   set('r_retention_over_pct',  pctOrDash(sums.retention.over, totalOver));
 }
+
 
 function renderKPIChart(srows, start, end) {
   const gran = aggGranularity(start, end);
