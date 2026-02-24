@@ -1825,7 +1825,7 @@ function renderRightChart(srows, start, end) {
 
 function aggregateGroups(drows) {
   const map = new Map();
-  for (const r of drowsChart) {
+  for (const r of drows) {
     const key = r.product + '||' + r.semi;
     if (!map.has(key)) {
       map.set(key, {
