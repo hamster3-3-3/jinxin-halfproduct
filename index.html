@@ -217,23 +217,23 @@
     <!-- KPI cards -->
     <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
       <div class="card p-4">
-        <div class="kpi-card-title">營業額（平均/日）</div>
+        <div class="kpi-card-title">營業額</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢額（平均/日）</div>
+        <div class="kpi-card-title">報廢額</div>
         <div id="kpiScrapAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">報廢率（平均）</div>
+        <div class="kpi-card-title">報廢率</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用額（平均/日）</div>
+        <div class="kpi-card-title">超用額</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
-        <div class="kpi-card-title">超用率（平均）</div>
+        <div class="kpi-card-title">超用率</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
 </div>
     </div>
@@ -243,9 +243,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">廢棄前10名（平均/日）</div>
+            <div class="kpi-card-title">廢棄前10名</div>
             <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（平均）：<span id="topScrapShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比：<span id="topScrapShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -254,9 +254,9 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">超用前10名（平均/日）</div>
+            <div class="kpi-card-title">超用前10名</div>
             <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比（平均）：<span id="topOverShare" class="mono">—</span></div>
+            <div class="subval mt-1">構成比：<span id="topOverShare" class="mono">—</span></div>
           </div>
           
         </div>
@@ -265,10 +265,10 @@
       <div class="card p-4">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <div class="kpi-card-title">共用類廢棄（平均/日）</div>
+            <div class="kpi-card-title">共用類廢棄</div>
             <div id="sharedAmt" class="kpi-card-value mono mt-1">—</div>
             <div class="subval mt-1 flex items-center gap-2">
-              構成比（平均，KPI 15%）：<span id="sharedShare" class="mono">—</span>
+              構成比（KPI 15%）：<span id="sharedShare" class="mono">—</span>
               <span id="sharedBadge" class="hidden"></span>
             </div>
           </div>
@@ -769,6 +769,22 @@ const weekStartTue = (d) => {
   const diff = (wd - 2 + 7) % 7;
   return new Date(z.getFullYear(), z.getMonth(), z.getDate() - diff);
 };
+
+
+// Date label helpers (global)
+const fmtMD = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+const fmtMMDD = (d) => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+
+// For month mode charts: expand month range to whole weeks (Tue~Mon)
+function expandToWholeWeeks(startISO, endISO){
+  const sd = parseISO(startISO);
+  const ed = parseISO(endISO);
+  const ws = weekStartTue(sd);
+  const weStart = weekStartTue(ed);
+  const we = new Date(weStart.getTime()); we.setDate(we.getDate()+6);
+  return { start: toISO(ws), end: toISO(we) };
+}
+
 
 const parseMaybeDate = (v) => {
   if (!v) return null;
@@ -1455,11 +1471,27 @@ function groupKeyByGran(dateStr, gran) {
 
 
 function aggregateSeries(rows, metric, gran, start = null, end = null) {
+  // KPI / 趨勢圖「加總」規則：
+  // - 金額類：bucket 內直接加總
+  // - 比率/構成比：bucket 內以「加總後重算」（避免直接平均每日百分比）
+  //   scrapRate = sum(scrapAmt)/sum(sales)
+  //   overuseRate = sum(overuseAmt)/sum(sales)
+  //   topScrapShare = sum(topScrapAmt)/sum(scrapAmt)
+  //   topOverShare  = sum(topOverAmt)/sum(overuseAmt)
+  //   sharedShare   = sum(sharedAmt)/sum(scrapAmt)
+
   const buckets = new Map();
 
   const hasRange = (start instanceof Date) && (end instanceof Date);
   const startT = hasRange ? start.getTime() : 0;
   const endT   = hasRange ? end.getTime() : 0;
+
+  const ensureBucket = (k) => {
+    if (!buckets.has(k)) {
+      buckets.set(k, { k, n: 0, sales: 0, scrapAmt: 0, overuseAmt: 0, topScrapAmt: 0, topOverAmt: 0, sharedAmt: 0 });
+    }
+    return buckets.get(k);
+  };
 
   for (const r of rows) {
     let k;
@@ -1467,23 +1499,27 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     if (gran === 'week') {
       const d = parseISO(r.date);
       const ws = weekStartTue(d); // 週二~週一
-      // 月別模式：只顯示「起始日在該月範圍內」的週別
+      // 月別模式：顯示「與該月區間有交集」的週別（跨月週也要納入）
       if (hasRange && state.mode === 'month') {
-        const t = ws.getTime();
-        if (t < startT || t > endT) continue;
+        const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
+        if (we.getTime() < startT || ws.getTime() > endT) continue;
       }
       k = toISO(ws);
     } else {
       k = groupKeyByGran(r.date, gran);
     }
 
-    if (!buckets.has(k)) buckets.set(k, {k, n: 0, sum: 0});
-    const b = buckets.get(k);
+    const b = ensureBucket(k);
     b.n += 1;
-    b.sum += (Number(r[metric]) || 0);
+    b.sales     += (Number(r.sales) || 0);
+    b.scrapAmt  += (Number(r.scrapAmt) || 0);
+    b.overuseAmt+= (Number(r.overuseAmt) || 0);
+    b.topScrapAmt += (Number(r.topScrapAmt) || 0);
+    b.topOverAmt  += (Number(r.topOverAmt) || 0);
+    b.sharedAmt   += (Number(r.sharedAmt) || 0);
   }
 
-  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a,b));
+  let keys = Array.from(buckets.keys()).sort((a, b) => safeLocaleCompare(a, b));
 
   // 年別：固定顯示 1~12 月（即使某些月份無資料，也保留 x 軸刻度）
   if (gran === 'month' && state.mode === 'year' && hasRange) {
@@ -1491,48 +1527,88 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
   }
 
+  const labels = keys.map(k => {
+    if (gran === 'week') {
+      const ws = parseISO(k);
+      const we = new Date(ws.getTime());
+      we.setDate(we.getDate() + 6);
+      return `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
+    }
+    if (gran === 'month' && state.mode === 'year') {
+      const mm = Number(String(k).split('-')[1] || 0);
+      return mm ? `${mm}月` : k;
+    }
+    // day / month(range) / others：沿用原本短標籤
+    return shortLabel(k);
+  });
+
   const values = keys.map(k => {
     const b = buckets.get(k);
     if (!b) return null;
-    // rate/share：以平均呈現；金額/數量：同樣維持「平均/日」(bucket 內日平均)
-    return b.sum / Math.max(1, b.n);
+
+    // 金額類：加總
+    if (['sales','scrapAmt','overuseAmt','topScrapAmt','topOverAmt','sharedAmt'].includes(metric)) {
+      return Number(b[metric]) || 0;
+    }
+
+    // 比率/構成比：加總後重算（避免平均每日百分比）
+    if (metric === 'scrapRate') {
+      return (b.sales > 0) ? (b.scrapAmt / b.sales) : null;
+    }
+    if (metric === 'overuseRate') {
+      return (b.sales > 0) ? (b.overuseAmt / b.sales) : null;
+    }
+    if (metric === 'topScrapShare') {
+      return (b.scrapAmt > 0) ? (b.topScrapAmt / b.scrapAmt) : null;
+    }
+    if (metric === 'topOverShare') {
+      return (b.overuseAmt > 0) ? (b.topOverAmt / b.overuseAmt) : null;
+    }
+    if (metric === 'sharedShare') {
+      return (b.scrapAmt > 0) ? (b.sharedAmt / b.scrapAmt) : null;
+    }
+
+    // fallback：保留原本 bucket 內平均（主要給未來擴充欄位用）
+    // 注意：這裡用 metric 欄位本身的平均，若未提供則回 null
+    const v = Number(b[metric]);
+    if (Number.isFinite(v)) return v;
+    return null;
   });
 
-  return { labels: keys, values };
+  return { labels, values, keys };
 }
 
-
 function updateKPICards(srows) {
-  const n = srows.length || 1;
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
-  const avgAmt = (k) => sum(k) / n;
-  const avgRate = (k) => sum(k) / n;
 
-  const sales = avgAmt('sales');
-  const scrapAmt = avgAmt('scrapAmt');
-  const scrapRate = avgRate('scrapRate');
-  const overAmt = avgAmt('overuseAmt');
-  const overRate = avgRate('overuseRate');
+  const totalSales = sum('sales');
+  const totalScrapAmt = sum('scrapAmt');
+  const totalOverAmt = sum('overuseAmt');
 
-  $('kpiSales').textContent = fmtMoney(sales);
-$('kpiScrapAmt').textContent = fmtMoney(scrapAmt);
-$('kpiScrapRate').textContent = fmtPct(scrapRate);
-$('kpiOverAmt').textContent = fmtMoney(overAmt);
-$('kpiOverRate').textContent = fmtPct(overRate);
-// top cards
-  const topScrapAmt = avgAmt('topScrapAmt');
-  const topScrapShare = avgRate('topScrapShare');
-  $('topScrapAmt').textContent = fmtMoney(topScrapAmt);
+  // 以區間加總後重新計算「整段期間」的比率（避免直接加總每日百分比）
+  const scrapRate = (Number.isFinite(totalSales) && totalSales > 0) ? (totalScrapAmt / totalSales) : NaN;
+  const overRate  = (Number.isFinite(totalSales) && totalSales > 0) ? (totalOverAmt  / totalSales) : NaN;
+
+  $('kpiSales').textContent = fmtMoney(totalSales);
+  $('kpiScrapAmt').textContent = fmtMoney(totalScrapAmt);
+  $('kpiScrapRate').textContent = fmtPct(scrapRate);
+  $('kpiOverAmt').textContent = fmtMoney(totalOverAmt);
+  $('kpiOverRate').textContent = fmtPct(overRate);
+
+  // Top cards：金額用「加總」，構成比用「加總後再計算」(以分母加總權重)
+  const totalTopScrapAmt = sum('topScrapAmt');
+  const topScrapShare = (Number.isFinite(totalScrapAmt) && totalScrapAmt > 0) ? (totalTopScrapAmt / totalScrapAmt) : NaN;
+  $('topScrapAmt').textContent = fmtMoney(totalTopScrapAmt);
   $('topScrapShare').textContent = fmtPct(topScrapShare);
 
-  const topOverAmt = avgAmt('topOverAmt');
-  const topOverShare = avgRate('topOverShare');
-  $('topOverAmt').textContent = fmtMoney(topOverAmt);
+  const totalTopOverAmt = sum('topOverAmt');
+  const topOverShare = (Number.isFinite(totalOverAmt) && totalOverAmt > 0) ? (totalTopOverAmt / totalOverAmt) : NaN;
+  $('topOverAmt').textContent = fmtMoney(totalTopOverAmt);
   $('topOverShare').textContent = fmtPct(topOverShare);
 
-  const sharedAmt = avgAmt('sharedAmt');
-  const sharedShare = avgRate('sharedShare');
-  $('sharedAmt').textContent = fmtMoney(sharedAmt);
+  const totalSharedAmt = sum('sharedAmt');
+  const sharedShare = (Number.isFinite(totalScrapAmt) && totalScrapAmt > 0) ? (totalSharedAmt / totalScrapAmt) : NaN;
+  $('sharedAmt').textContent = fmtMoney(totalSharedAmt);
   $('sharedShare').textContent = fmtPct(sharedShare);
 
   const badge = $('sharedBadge');
@@ -1550,6 +1626,7 @@ $('kpiOverRate').textContent = fmtPct(overRate);
     badge.classList.add('hidden');
   }
 }
+
 
 function destroyChart(key) {
   const c = state.charts[key];
@@ -1647,7 +1724,7 @@ function renderKPIChart(srows, start, end) {
         x: {
           ticks: {
             callback: function(value) {
-              return shortLabel(this.getLabelForValue(value));
+              return this.getLabelForValue(value);
             }
           }
         },
@@ -1696,8 +1773,8 @@ function renderRightChart(srows, start, end) {
   const labels = s.labels;
   const bounds = computeBounds(s.values, meta.kind);
 
-  let dsLabel = title + (isShare ? '｜構成比（平均）' : '｜金額總計（平均/日）');
-  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)（平均）';
+  let dsLabel = title + (isShare ? '｜構成比' : '｜金額總計');
+  if (state.rightMode === 'shared' && isShare) dsLabel = title + '｜構成比(KPI15%)';
 
   const ctx = $('rightChart').getContext('2d');
   state.charts.right = new Chart(ctx, {
@@ -1730,7 +1807,7 @@ function renderRightChart(srows, start, end) {
         x: {
           ticks: {
             callback: function(value) {
-              return shortLabel(this.getLabelForValue(value));
+              return this.getLabelForValue(value);
             }
           }
         },
@@ -1887,29 +1964,41 @@ function renderSuggest(containerId, items, onClick) {
 
 function getSelectedRangeRows() {
   const {start, end} = getDateRange();
+
+  // Cards / tables use the strict selected range
   const srows = filterByRange(state.summary, start, end);
   const drows = filterByRange(state.details, start, end);
-  return {start, end, srows, drows};
+
+  // Charts (month mode): include cross-month days for weeks that intersect the month
+  let srowsChart = srows;
+  let drowsChart = drows;
+  if (state.mode === 'month') {
+    const ex = expandToWholeWeeks(start, end);
+    srowsChart = filterByRange(state.summary, ex.start, ex.end);
+    drowsChart = filterByRange(state.details, ex.start, ex.end);
+  }
+
+  return {start, end, srows, drows, srowsChart, drowsChart};
 }
 
 function renderAll() {
-  const { start, end, srows, drows } = getSelectedRangeRows();
-  state.view = { start, end, srows, drows };
+  const { start, end, srows, drows, srowsChart, drowsChart } = getSelectedRangeRows();
+  state.view = { start, end, srows, drows, srowsChart, drowsChart };
 
   updateKPICards(srows);
-  renderKPIChart(srows, start, end);
-  renderRightChart(srows, start, end);
-  applyGroupFilterAndRender(drows);
+  renderKPIChart(srowsChart, start, end);
+  renderRightChart(srowsChart, start, end);
+  applyGroupFilterAndRender(drowsChart);
 }
 
 function renderKPIOnly() {
   if (!state.view) return renderAll();
-  renderKPIChart(state.view.srows, state.view.start, state.view.end);
+  renderKPIChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
 function renderRightOnly() {
   if (!state.view) return renderAll();
-  renderRightChart(state.view.srows, state.view.start, state.view.end);
+  renderRightChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
 
@@ -1921,15 +2010,30 @@ function renderSelectedItem() {
     return;
   }
   const {start, end} = getDateRange();
-  const drows = filterByRange(state.details, start, end).filter(r => (r.product + '||' + r.semi) === state.selectedKey);
-  if (!drows.length) {
+
+  // 月別：趨勢圖需納入跨月週（只要週區間與該月有交集，就計入整週資料）
+  let chartStart = start, chartEnd = end;
+  if (state.mode === 'month') {
+    const ex = expandToWholeWeeks(start, end);
+    chartStart = ex.start;
+    chartEnd = ex.end;
+  }
+
+  // 表格：維持嚴格月份區間
+  const drowsBase = filterByRange(state.details, start, end)
+    .filter(r => (r.product + '||' + r.semi) === state.selectedKey);
+
+  // 趨勢圖：使用擴展後區間
+  const drowsChart = filterByRange(state.details, chartStart, chartEnd)
+    .filter(r => (r.product + '||' + r.semi) === state.selectedKey);
+  if (!drowsBase.length && !drowsChart.length) {
     $('itemPanel').classList.add('hidden');
     return;
   }
 
   // aggregate by date
   const m = new Map();
-  for (const r of drows) {
+  for (const r of drowsChart) {
     if (!m.has(r.date)) m.set(r.date, {
       date: r.date,
       product: r.product,
@@ -1959,15 +2063,48 @@ function renderSelectedItem() {
   }
   state.selectedDaily = daily;
 
+  // base daily for table (strict selected range)
+  const mBase = new Map();
+  for (const r of drowsBase) {
+    if (!mBase.has(r.date)) mBase.set(r.date, {
+      date: r.date,
+      product: r.product,
+      semi: r.semi,
+      order: 0, output: 0, refill: 0,
+      priceSum: 0, priceN: 0,
+      diffQty: 0, diffAmt: 0,
+      scrapQty: 0, scrapAmt: 0,
+      overuseAmt: 0
+    });
+    const o = mBase.get(r.date);
+    o.order += Number(r.order)||0;
+    o.output += Number(r.output)||0;
+    o.refill += Number(r.refill)||0;
+    if (Number.isFinite(r.price) && r.price>0) { o.priceSum += r.price; o.priceN += 1; }
+    o.diffQty += Number(r.diffQty)||0;
+    o.diffAmt += Number(r.diffAmt)||0;
+    o.scrapQty += Number(r.scrapQty)||0;
+    o.scrapAmt += Number(r.scrapAmt)||0;
+    o.overuseAmt += Number(r.overuseAmt)||0;
+  }
+  const dailyBase = Array.from(mBase.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+  for (const o of dailyBase) {
+    o.price = o.priceN ? (o.priceSum / o.priceN) : null;
+    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.overuseQty = (o.price && o.price>0) ? (o.overuseAmt / o.price) : null;
+  }
+
+
   const title = daily[0].product + '｜' + daily[0].semi;
   $('itemTitle').textContent = `${title}（${start} ～ ${end}）`;
   $('itemPanel').classList.remove('hidden');
 
   renderItemChart(daily);
-  renderDetailTable(daily);
+  renderDetailTable(dailyBase.length ? dailyBase : daily);
 }
 
 function renderItemChart(daily) {
+
   destroyChart('item');
 
   const metric = state.itemMetricSelected || 'diffAmt';
@@ -2043,6 +2180,16 @@ function renderItemChart(daily) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
   };
 
+// 月別（跨月週）計算邊界：只要週區間任一天落在該月，就納入該週整段
+let monthStart = null;
+let monthEnd = null;
+if (mode === 'month') {
+  const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
+  const mSel = Number(state.selection.month || $('monthSel').value || (parsed[0] ? (parsed[0]._d.getMonth()+1) : (new Date().getMonth()+1)));
+  monthStart = new Date(ySel, mSel - 1, 1);
+  monthEnd = new Date(ySel, mSel, 0); // 當月最後一天
+}
+
   const buckets = new Map(); // key -> { d:Date, label:string, sum:number, cnt:number }
   const isRate = (m.kind === 'rate');
 
@@ -2077,8 +2224,11 @@ function renderItemChart(daily) {
   } else if (mode === 'month') {
     for (const r of parsed) {
       const ws = weekStartTue(r._d);
+      const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
+      // 只顯示與該月有交集的週（跨月週也要納入）
+      if (we < monthStart || ws > monthEnd) continue;
       const key = toISO(ws);
-      const label = fmtMMDD(ws);
+      const label = `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
       const v = m.get(r);
       // 月別：金額/數量用「加總」，比率用「平均」
       addToBucket(key, ws, label, v);
