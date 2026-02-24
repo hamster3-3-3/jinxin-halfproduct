@@ -104,6 +104,49 @@ function weekRangeKeyFromSelection(){
 }
 
 
+
+
+function prevWeekRangeKeyFromSelection(){
+  // Only meaningful in week mode.
+  if (state.mode !== 'week') return null;
+  const v = safeStr(state.selection.weekStart).trim() || safeStr($('weekSel')?.value).trim();
+  if (!v) return null;
+
+  let s=null, e=null;
+  if (v.includes('~') || v.includes('～')){
+    const parts = v.split(/~|～/).map(x=>x.trim()).filter(Boolean);
+    s = parts[0] || null;
+    e = parts[1] || null;
+  } else {
+    s = v;
+    const ds = parseISO(s);
+    if (!(ds instanceof Date) || isNaN(ds)) return null;
+    e = toISO(addDays(ds, 6));
+  }
+  if (!s || !e) return null;
+
+  const ds = parseISO(s), de = parseISO(e);
+  if (!(ds instanceof Date) || isNaN(ds) || !(de instanceof Date) || isNaN(de)) return null;
+
+  const pds = addDays(ds, -7);
+  const pde = addDays(de, -7);
+  const a = String(pds.getMonth()+1).padStart(2,'0') + String(pds.getDate()).padStart(2,'0');
+  const b = String(pde.getMonth()+1).padStart(2,'0') + String(pde.getDate()).padStart(2,'0');
+  return a + '-' + b;
+}
+
+function makeTop20DupSetByRange(rangeKey, kind){
+  const s = new Set();
+  if (!rangeKey) return s;
+  for (const r of (state.top20Entries||[])){
+    if (r.kind !== kind) continue;
+    if (r.rangeKey !== rangeKey) continue;
+    const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
+    s.add(k);
+  }
+  return s;
+}
+
 function rangeKeyTouchesMonth(rangeKey, monthKey){
   // rangeKey: MMDD-MMDD ; monthKey: YYYY-MM
   if (!rangeKey || !monthKey) return false;
@@ -3523,7 +3566,8 @@ function renderTop20Expand(){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
-  const dupSet = st.prevMonthKey ? makeTop20DupSet(st.prevMonthKey, kind) : new Set();
+  const dupSet = st.prevRangeKey ? makeTop20DupSetByRange(st.prevRangeKey, kind)
+    : (st.prevMonthKey ? makeTop20DupSet(st.prevMonthKey, kind) : new Set());
 
   const tbody = $('top20ExpBody');
   tbody.innerHTML = '';
