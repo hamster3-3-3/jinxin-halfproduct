@@ -164,6 +164,50 @@ function rangeKeyTouchesMonth(rangeKey, monthKey){
   return m >= sm || m <= em;
 }
 
+
+
+function rangeKeyToDates(year, rangeKey){
+  // rangeKey: "MMDD-MMDD"
+  if (!year || !rangeKey) return null;
+  const parts = String(rangeKey).split('-');
+  if (parts.length !== 2) return null;
+  const a = parts[0], b = parts[1];
+  if (a.length !== 4 || b.length !== 4) return null;
+  const sm = Number(a.slice(0,2)), sd = Number(a.slice(2,4));
+  const em = Number(b.slice(0,2)), ed = Number(b.slice(2,4));
+  if (!sm || !sd || !em || !ed) return null;
+
+  const y = Number(year);
+  let start = new Date(y, sm-1, sd);
+  let end = new Date(y, em-1, ed);
+  // handle wrap (e.g. 1229-0104)
+  if (end < start) end = new Date(y+1, em-1, ed);
+  return {start, end};
+}
+
+function entryEndBeforeISO(entry, cutoffISO){
+  if (!entry || !entry.rangeKey || !cutoffISO) return false;
+  const y = entry.year || (safeStr(entry.source).match(/(20\d{2})/)||[])[1];
+  const d = rangeKeyToDates(y, entry.rangeKey);
+  if (!d) return false;
+  const cutoff = parseISO(cutoffISO);
+  if (!(cutoff instanceof Date) || isNaN(cutoff)) return false;
+  return d.end < cutoff;
+}
+
+function makeTop20DupSetBefore(kind, cutoffStartISO){
+  // Any appearance BEFORE the selected range start counts as duplicate.
+  const s = new Set();
+  if (!cutoffStartISO) return s;
+  for (const r of (state.top20Entries||[])){
+    if (r.kind !== kind) continue;
+    if (!entryEndBeforeISO(r, cutoffStartISO)) continue;
+    const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
+    s.add(k);
+  }
+  return s;
+}
+
 function addDays(d, n){
   const x = new Date(d.getTime());
   x.setDate(x.getDate() + Number(n||0));
@@ -1329,6 +1373,7 @@ function monthKeyFromRangeKey(rangeKey, fileName){
 }
 
 function parseTop20FromWB(wb, fileName){
+  const fileYear = (safeStr(fileName).match(/(20\d{2})/)||[])[1] || null;
   const mFileRange = safeStr(fileName).match(/(\d{4})\s*[-~～]\s*(\d{4})/);
   const fileRangeKey = mFileRange ? (mFileRange[1] + '-' + mFileRange[2]) : null;
   const out = [];
@@ -1422,7 +1467,8 @@ function parseTop20FromWB(wb, fileName){
         semi: semi || product,
         amt: Number.isFinite(amt) ? amt : 0,
         desc, act,
-        source: safeStr(fileName)
+        source: safeStr(fileName),
+        year: fileYear
       });
     }
   }
@@ -3574,8 +3620,7 @@ function renderTop20Expand(){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
-  const dupSet = st.prevRangeKey ? makeTop20DupSetByRange(st.prevRangeKey, kind)
-    : (st.prevMonthKey ? makeTop20DupSet(st.prevMonthKey, kind) : new Set());
+  const dupSet = makeTop20DupSetBefore(kind, st.cutoffStartISO);
 
   const tbody = $('top20ExpBody');
   tbody.innerHTML = '';
