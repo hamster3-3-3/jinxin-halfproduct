@@ -51,6 +51,7 @@ function rangeKeyFromMonthCell(v){
   }
   return null;
 }
+
 function weekRangeKeyFromSelection(){
   let s = null, e = null;
   if (state.mode === 'week'){
@@ -60,12 +61,26 @@ function weekRangeKeyFromSelection(){
     s = state.selection.start; e = state.selection.end;
   }
   if (!s || !e) return null;
+
+  // tolerate "YYYY-MM-DD ~ YYYY-MM-DD" stored in one string
+  const splitRange = (v, which)=>{
+    v = String(v);
+    if (v.includes('~') || v.includes('～')){
+      const parts = v.split(/~|～/).map(x=>x.trim()).filter(Boolean);
+      return parts[which] || v;
+    }
+    return v.trim();
+  };
+  s = splitRange(s, 0);
+  e = splitRange(e, 1);
+
   const ds = parseISO(s); const de = parseISO(e);
   if (!(ds instanceof Date) || isNaN(ds) || !(de instanceof Date) || isNaN(de)) return null;
   const a = String(ds.getMonth()+1).padStart(2,'0') + String(ds.getDate()).padStart(2,'0');
   const b = String(de.getMonth()+1).padStart(2,'0') + String(de.getDate()).padStart(2,'0');
   return a + '-' + b;
 }
+
 function rangeKeyTouchesMonth(rangeKey, monthKey){
   // rangeKey: MMDD-MMDD ; monthKey: YYYY-MM
   if (!rangeKey || !monthKey) return false;
@@ -444,45 +459,7 @@ function fallbackScanAmountRight(sheet, r, c){
           <div class="subval">超用：<span id="r_above105_over_amt" class="mono">—</span>（<span id="r_above105_over_pct" class="mono">—</span>）</div>
         </div>
 
-<!-- Top20 Expand Panel -->
-<div id="top20Expand" class="hidden mt-6">
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-      <div>
-        <div class="text-lg font-semibold text-slate-900" id="top20ExpTitle">前二十大原因</div>
-        <div class="text-sm text-slate-500" id="top20ExpSubtitle"></div>
-      </div>
-      <div class="flex items-center gap-2">
-        <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
-          <button id="top20ExpTabScrap" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
-          <button id="top20ExpTabOver"  class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
-        </div>
-        <button id="top20ExpClose" class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">收合</button>
-      </div>
-    </div>
-
-    <div class="px-5 py-4">
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr class="text-left text-slate-600 border-b border-slate-200">
-              <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
-              <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
-              <th class="py-2 pr-4 whitespace-nowrap" id="top20ExpAmtHeader">報廢金額</th>
-              <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
-              <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
-              <th class="py-2 pr-2 whitespace-nowrap">重複20大</th>
-            </tr>
-          </thead>
-          <tbody id="top20ExpBody" class="text-slate-800"></tbody>
-        </table>
-      </div>
-      <div id="top20ExpEmpty" class="hidden text-slate-500 text-sm py-6">此條件下無符合資料。</div>
-    </div>
-  </div>
-</div>
-
-        <div class="card p-4">
+<div class="card p-4">
           <div class="kpi-card-title">調理多產</div>
           <div class="subval mt-2">報廢：<span id="r_tooMuch_scrap_amt" class="mono">—</span>（<span id="r_tooMuch_scrap_pct" class="mono">—</span>）</div>
           <div class="subval">超用：<span id="r_tooMuch_over_amt" class="mono">—</span>（<span id="r_tooMuch_over_pct" class="mono">—</span>）</div>
@@ -525,7 +502,46 @@ function fallbackScanAmountRight(sheet, r, c){
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div class="text-sm font-semibold">半成品展開</div>
+            <div class="text-sm font-semibold">
+<!-- Top20 Expand Panel -->
+<div id="top20Expand" class="hidden mt-6">
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+      <div>
+        <div class="text-lg font-semibold text-slate-900" id="top20ExpTitle">前二十大原因</div>
+        <div class="text-sm text-slate-500" id="top20ExpSubtitle"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+          <button id="top20ExpTabScrap" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+          <button id="top20ExpTabOver"  class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+        </div>
+        <button id="top20ExpClose" class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">收合</button>
+      </div>
+    </div>
+
+    <div class="px-5 py-4">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-600 border-b border-slate-200">
+              <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap" id="top20ExpAmtHeader">報廢金額</th>
+              <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
+              <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
+              <th class="py-2 pr-2 whitespace-nowrap">重複20大</th>
+            </tr>
+          </thead>
+          <tbody id="top20ExpBody" class="text-slate-800"></tbody>
+        </table>
+      </div>
+      <div id="top20ExpEmpty" class="hidden text-slate-500 text-sm py-6">此條件下無符合資料。</div>
+    </div>
+  </div>
+</div>
+
+半成品展開</div>
 </div>
           <div class="flex flex-wrap gap-2 items-center">
             <div class="text-xs muted">類型</div>
@@ -1232,9 +1248,10 @@ function inferMonthKeyFromFileName(fileName){
   return y ? (y+'-01') : null;
 }
 
+
 function parseTop20FromWB(wb, fileName){
-  const monthKey = inferMonthKeyFromFileName(fileName); // fallback only
-const out = [];
+  const monthKey = inferMonthKeyFromFileName(fileName); // fallback only (YYYY-MM)
+  const out = [];
   for (const kind of ['scrap','over']){
     const sname = findTop20SheetName(wb, kind);
     if (!sname) continue;
@@ -1242,62 +1259,60 @@ const out = [];
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
     if (!rows || !rows.length) continue;
 
-    // locate header row by finding cells containing 商品名 and 分析原因
+    // Header row: contains 月別 + 分析原因 + 原因說明 + 後續對策
     let hdrR = -1;
-    for (let r=0; r<Math.min(rows.length, 40); r++){
-      const row = rows[r]||[];
-      const line = row.map(v=>normCell(v)).join('|');
-      if (line.includes('商品名') && (line.includes('分析原因') || line.includes('原因'))) { hdrR = r; break; }
+    for (let r=0; r<Math.min(rows.length, 30); r++){
+      const line = (rows[r]||[]).map(v=>normCell(v)).join('|');
+      if (line.includes('月別') && line.includes('分析原因') && line.includes('原因說明') && line.includes('後續對策')){
+        hdrR = r; break;
+      }
     }
     if (hdrR < 0) continue;
 
-    const header = rows[hdrR]||[];
-    const col = (nameList)=>{
-      for (let c=0;c<header.length;c++){
-        const h = normCell(header[c]);
+    const headerA = rows[hdrR]||[];
+    const col = (names)=>{
+      for (let c=0;c<headerA.length;c++){
+        const h = normCell(headerA[c]);
         if (!h) continue;
-        for (const n of nameList){
+        for (const n of names){
           if (h.includes(normKey(n))) return c;
         }
       }
       return -1;
     };
 
-    const cProd = col(['商品名','商品']);
-    const cSemi = col(['半成品名','半成品','名稱']);
-    const cReason = col(['分析原因','原因']);
     const cMonth = col(['月別']);
-    const cDesc = col(['原因說明','說明','原因描述']);
-    const cAct  = col(['後續對策','對策','改善','改善對策']);
-    const cAmt  = (kind==='scrap')
-      ? col(['報廢金額','報廢(元)','報廢金額(元)','金額'])
-      : col(['超用金額','超用(元)','超用金額(元)','金額']);
+    const cName  = col(['名稱']);          // 半成品名稱（亦作商品名 fallback）
+    const cAmt   = (kind==='scrap') ? col(['報廢金額']) : col(['超用金額']);
+    const cReason= col(['分析原因']);
+    const cDesc  = col(['原因說明']);
+    const cAct   = col(['後續對策']);
 
     let lastMonthVal = '';
     for (let r=hdrR+1; r<rows.length; r++){
       const row = rows[r]||[];
-      // stop when empty
-      const prod = safeStr(row[cProd]).trim();
-      const semi = safeStr(row[cSemi]).trim();
-      if (!prod && !semi) continue;
 
       const monthValRaw = (cMonth>=0) ? safeStr(row[cMonth]).trim() : '';
       if (monthValRaw) lastMonthVal = monthValRaw;
       const rangeKey = rangeKeyFromMonthCell(lastMonthVal) || null;
 
+      const name = safeStr(row[cName]).trim();
       const reason = safeStr(row[cReason]).trim();
+      // skip empty lines
+      if (!name && !reason) continue;
+
       const amt = asNumber(row[cAmt]);
       const desc = safeStr(row[cDesc]).trim();
       const act  = safeStr(row[cAct]).trim();
 
+      // 商品名 / 半成品名：此表以半成品為主，商品名先同名（後續若你要備註-商品名稱可再改）
       out.push({
         kind,
-        monthKey, // y-m (fallback)
-        rangeKey, // mmdd-mmdd from 月別
-
+        monthKey,
+        rangeKey,
         reason,
-        product: prod,
-        semi: semi,
+        product: name,
+        semi: name,
         amt: Number.isFinite(amt)? amt : 0,
         desc, act,
         source: safeStr(fileName)
@@ -1306,6 +1321,7 @@ const out = [];
   }
   return out;
 }
+
 
 // return previous-month key based on a date
 function prevMonthKeyFromISO(endISO){
