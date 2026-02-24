@@ -39,6 +39,50 @@ function parseNumber(v){
 }
 
 
+
+
+function normDigits(s){ return String(s||'').replace(/\D/g,''); }
+function rangeKeyFromMonthCell(v){
+  const dig = normDigits(v);
+  if (dig.length >= 8){
+    const a = dig.slice(0,4);
+    const b = dig.slice(4,8);
+    return a + '-' + b;
+  }
+  return null;
+}
+function weekRangeKeyFromSelection(){
+  let s = null, e = null;
+  if (state.mode === 'week'){
+    s = state.selection.weekStart || state.selection.start;
+    e = state.selection.weekEnd || state.selection.end;
+  } else if (state.mode === 'day' || state.mode === 'range'){
+    s = state.selection.start; e = state.selection.end;
+  }
+  if (!s || !e) return null;
+  const ds = parseISO(s); const de = parseISO(e);
+  if (!(ds instanceof Date) || isNaN(ds) || !(de instanceof Date) || isNaN(de)) return null;
+  const a = String(ds.getMonth()+1).padStart(2,'0') + String(ds.getDate()).padStart(2,'0');
+  const b = String(de.getMonth()+1).padStart(2,'0') + String(de.getDate()).padStart(2,'0');
+  return a + '-' + b;
+}
+function rangeKeyTouchesMonth(rangeKey, monthKey){
+  // rangeKey: MMDD-MMDD ; monthKey: YYYY-MM
+  if (!rangeKey || !monthKey) return false;
+  const m = Number(monthKey.split('-')[1]);
+  const parts = String(rangeKey).split('-');
+  if (parts.length !== 2) return false;
+  const a = parts[0], b = parts[1];
+  if (a.length !== 4 || b.length !== 4) return false;
+  const sm = Number(a.slice(0,2));
+  const em = Number(b.slice(0,2));
+  if (!sm || !em || !m) return false;
+  if (sm === m || em === m) return true;
+  if (sm < em) return m >= sm && m <= em;
+  // cross-year / cross-month wrap
+  return m >= sm || m <= em;
+}
+
 function addDays(d, n){
   const x = new Date(d.getTime());
   x.setDate(x.getDate() + Number(n||0));
@@ -399,6 +443,45 @@ function fallbackScanAmountRight(sheet, r, c){
           <div class="subval mt-2">報廢：<span id="r_above105_scrap_amt" class="mono">—</span>（<span id="r_above105_scrap_pct" class="mono">—</span>）</div>
           <div class="subval">超用：<span id="r_above105_over_amt" class="mono">—</span>（<span id="r_above105_over_pct" class="mono">—</span>）</div>
         </div>
+
+<!-- Top20 Expand Panel -->
+<div id="top20Expand" class="hidden mt-6">
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+      <div>
+        <div class="text-lg font-semibold text-slate-900" id="top20ExpTitle">前二十大原因</div>
+        <div class="text-sm text-slate-500" id="top20ExpSubtitle"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+          <button id="top20ExpTabScrap" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+          <button id="top20ExpTabOver"  class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+        </div>
+        <button id="top20ExpClose" class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">收合</button>
+      </div>
+    </div>
+
+    <div class="px-5 py-4">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-600 border-b border-slate-200">
+              <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap" id="top20ExpAmtHeader">報廢金額</th>
+              <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
+              <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
+              <th class="py-2 pr-2 whitespace-nowrap">重複20大</th>
+            </tr>
+          </thead>
+          <tbody id="top20ExpBody" class="text-slate-800"></tbody>
+        </table>
+      </div>
+      <div id="top20ExpEmpty" class="hidden text-slate-500 text-sm py-6">此條件下無符合資料。</div>
+    </div>
+  </div>
+</div>
+
         <div class="card p-4">
           <div class="kpi-card-title">調理多產</div>
           <div class="subval mt-2">報廢：<span id="r_tooMuch_scrap_amt" class="mono">—</span>（<span id="r_tooMuch_scrap_pct" class="mono">—</span>）</div>
@@ -1150,8 +1233,8 @@ function inferMonthKeyFromFileName(fileName){
 }
 
 function parseTop20FromWB(wb, fileName){
-  const monthKey = inferMonthKeyFromFileName(fileName);
-  const out = [];
+  const monthKey = inferMonthKeyFromFileName(fileName); // fallback only
+const out = [];
   for (const kind of ['scrap','over']){
     const sname = findTop20SheetName(wb, kind);
     if (!sname) continue;
@@ -1183,12 +1266,14 @@ function parseTop20FromWB(wb, fileName){
     const cProd = col(['商品名','商品']);
     const cSemi = col(['半成品名','半成品','名稱']);
     const cReason = col(['分析原因','原因']);
+    const cMonth = col(['月別']);
     const cDesc = col(['原因說明','說明','原因描述']);
     const cAct  = col(['後續對策','對策','改善','改善對策']);
     const cAmt  = (kind==='scrap')
       ? col(['報廢金額','報廢(元)','報廢金額(元)','金額'])
       : col(['超用金額','超用(元)','超用金額(元)','金額']);
 
+    let lastMonthVal = '';
     for (let r=hdrR+1; r<rows.length; r++){
       const row = rows[r]||[];
       // stop when empty
@@ -1196,13 +1281,20 @@ function parseTop20FromWB(wb, fileName){
       const semi = safeStr(row[cSemi]).trim();
       if (!prod && !semi) continue;
 
+      const monthValRaw = (cMonth>=0) ? safeStr(row[cMonth]).trim() : '';
+      if (monthValRaw) lastMonthVal = monthValRaw;
+      const rangeKey = rangeKeyFromMonthCell(lastMonthVal) || null;
+
       const reason = safeStr(row[cReason]).trim();
       const amt = asNumber(row[cAmt]);
       const desc = safeStr(row[cDesc]).trim();
       const act  = safeStr(row[cAct]).trim();
 
       out.push({
-        kind, monthKey,
+        kind,
+        monthKey, // y-m (fallback)
+        rangeKey, // mmdd-mmdd from 月別
+
         reason,
         product: prod,
         semi: semi,
@@ -1237,7 +1329,7 @@ function makeTop20DupSet(monthKey, kind){
 }
 
 // UI: open modal for a reason
-function openTop20ModalForReason(reasonKey){
+function openTop20ExpandForReason(reasonKey){
   const modal = $('top20Modal');
   if (!modal) return;
   state._top20Modal = state._top20Modal || { reasonKey, kind:'scrap' };
@@ -2407,7 +2499,7 @@ function bindReasonCardClicks(){
     card.style.cursor = 'pointer';
     card.addEventListener('click', (e)=>{
       // ignore clicks on inner controls (none currently)
-      openTop20ModalForReason(key);
+      openTop20ExpandForReason(key);
     });
     card.__boundReasonClick = true;
   }
@@ -3273,6 +3365,105 @@ function syncModeUI() {
   $('weekWrap').classList.toggle('hidden', state.mode !== 'week');
   $('dayWrap').classList.toggle('hidden', state.mode !== 'day');
   $('rangeWrap').classList.toggle('hidden', state.mode !== 'range');
+}
+
+
+function openTop20ExpandForReason(reasonKey){
+  state._top20Exp = state._top20Exp || { reasonKey, kind:'scrap' };
+  state._top20Exp.reasonKey = reasonKey;
+  state._top20Exp.kind = 'scrap';
+
+  const wkKey = weekRangeKeyFromSelection();
+  const monthKey = (state.mode==='month')
+    ? (String(state.selection.year) + '-' + String(state.selection.month).padStart(2,'0'))
+    : null;
+
+  state._top20Exp.rangeKey = wkKey;
+  state._top20Exp.monthKey = monthKey;
+
+  let endISO = null;
+  if (state.mode==='month'){
+    const y = Number(state.selection.year), m = Number(state.selection.month);
+    endISO = toISO(new Date(y, m, 0));
+  } else if (state.mode==='week'){
+    endISO = state.selection.weekEnd || state.selection.end;
+  } else {
+    endISO = state.selection.end;
+  }
+  state._top20Exp.prevMonthKey = endISO ? prevMonthKeyFromISO(endISO) : null;
+
+  const panel = $('top20Expand');
+  if (!panel) return;
+  panel.classList.remove('hidden');
+
+  $('top20ExpTitle').textContent = `前二十大原因｜${reasonKey}`;
+  const subParts = [];
+  if (wkKey) subParts.push(`區間：${wkKey.replace('-', '~')}`);
+  if (monthKey) subParts.push(`月份：${monthKey}`);
+  if (state._top20Exp.prevMonthKey) subParts.push(`重複判定比對：${state._top20Exp.prevMonthKey}`);
+  $('top20ExpSubtitle').textContent = subParts.join(' ｜ ');
+
+  $('top20ExpTabScrap').onclick = ()=>{ state._top20Exp.kind='scrap'; renderTop20Expand(); };
+  $('top20ExpTabOver').onclick  = ()=>{ state._top20Exp.kind='over';  renderTop20Expand(); };
+  $('top20ExpClose').onclick = ()=>{ $('top20Expand').classList.add('hidden'); };
+
+  renderTop20Expand();
+  panel.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function renderTop20Expand(){
+  const st = state._top20Exp;
+  if (!st) return;
+  const kind = st.kind;
+  const reasonKey = st.reasonKey;
+  const rangeKey = st.rangeKey;
+  const monthKey = st.monthKey;
+
+  const bS = $('top20ExpTabScrap'), bO = $('top20ExpTabOver');
+  if (kind==='scrap'){
+    bS.className='px-3 py-1 rounded-full bg-slate-900 text-white';
+    bO.className='px-3 py-1 rounded-full text-slate-700 hover:bg-white';
+    $('top20ExpAmtHeader').textContent='報廢金額';
+  } else {
+    bO.className='px-3 py-1 rounded-full bg-slate-900 text-white';
+    bS.className='px-3 py-1 rounded-full text-slate-700 hover:bg-white';
+    $('top20ExpAmtHeader').textContent='超用金額';
+  }
+
+  let rows = (state.top20Entries||[]).filter(r => r.kind===kind && normKey(r.reason)===normKey(reasonKey));
+
+  if (rangeKey){
+    rows = rows.filter(r => r.rangeKey && r.rangeKey===rangeKey);
+  } else if (monthKey){
+    rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
+  }
+
+  const dupSet = st.prevMonthKey ? makeTop20DupSet(st.prevMonthKey, kind) : new Set();
+
+  const tbody = $('top20ExpBody');
+  tbody.innerHTML = '';
+  if (!rows.length){
+    $('top20ExpEmpty').classList.remove('hidden');
+    return;
+  }
+  $('top20ExpEmpty').classList.add('hidden');
+
+  rows.sort((a,b)=>(b.amt||0)-(a.amt||0));
+  for (const r of rows){
+    const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
+    const dup = dupSet.has(k) ? '是' : '否';
+    const tr = document.createElement('tr');
+    tr.className='border-b border-slate-100 hover:bg-slate-50';
+    tr.innerHTML = `
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.product)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.semi)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
+      <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
+      <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
+      <td class="py-2 pr-2 whitespace-nowrap">${dup}</td>
+    `;
+    tbody.appendChild(tr);
+  }
 }
 
 async function init(force=false) {
