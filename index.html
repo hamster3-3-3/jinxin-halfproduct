@@ -2968,8 +2968,6 @@ function renderAll() {
 
 function renderKPIOnly() {
   if (!state.view) return renderAll();
-  bindAutoApply();
-  applySelectionFromUI();
   renderKPIChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
 }
 
@@ -3487,7 +3485,15 @@ function wireUI() {
   });
 
   $('exportCsvBtn').addEventListener('click', exportSelectedCsv);
+
+  // Auto refresh on mode change
+  for (const id of ['btnYear','btnMonth','btnWeek','btnDay','btnRange']){
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('click', ()=>{ setTimeout(()=>applySelectionFromUI(), 0); });
+  }
 }
+
 
 function syncModeUI() {
   $('yearWrap').classList.toggle('hidden', false);
@@ -3667,8 +3673,11 @@ async function init(force=false) {
     wireUI();
     initStickyControls();
     syncModeUI();
-    renderAll();
-    state.loaded = true;
+    bindAutoApply();
+    // auto-apply current selector values
+    applySelectionFromUI();
+    // renderAll() is invoked by applySelectionFromUI()
+state.loaded = true;
   } catch (e) {
     console.error(e);
     $('dataStatus').textContent = '載入失敗：' + e.message;
