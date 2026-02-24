@@ -2180,6 +2180,16 @@ function renderItemChart(daily) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
   };
 
+// 月別（跨月週）計算邊界：只要週區間任一天落在該月，就納入該週整段
+let monthStart = null;
+let monthEnd = null;
+if (mode === 'month') {
+  const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
+  const mSel = Number(state.selection.month || $('monthSel').value || (parsed[0] ? (parsed[0]._d.getMonth()+1) : (new Date().getMonth()+1)));
+  monthStart = new Date(ySel, mSel - 1, 1);
+  monthEnd = new Date(ySel, mSel, 0); // 當月最後一天
+}
+
   const buckets = new Map(); // key -> { d:Date, label:string, sum:number, cnt:number }
   const isRate = (m.kind === 'rate');
 
