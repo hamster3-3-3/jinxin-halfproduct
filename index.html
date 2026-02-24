@@ -1507,21 +1507,42 @@ let amtC = p.c;
 }
 
 // Find nearest 報廢/超用 rows within this mini-table (below header).
-// IMPORTANT: we search rows below the reason title and then read the amount from the chosen amtC column.
+// IMPORTANT: some blocks (esp. 「取樣不穩」) may have merged cells, causing label columns to drift.
+// So we scan a wider horizontal window and only use the row index; amount is still read from amtC.
 let scrapRowL = -1, overRowL = -1;
-for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+12); rr++){
+for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+18); rr++){
   const row = rows[rr]||[];
-  for (let cc=Math.max(0, amtC-6); cc<=Math.min(row.length-1, amtC); cc++){
+  const cStart = Math.max(0, p.c-28);
+  const cEnd = Math.min(row.length-1, p.c+10);
+  for (let cc=cStart; cc<=cEnd; cc++){
     const v = normCell(row[cc]);
     if (!v) continue;
-    if (scrapRowL<0 && v==='報廢') scrapRowL = rr;
-    if (overRowL<0 && v==='超用') overRowL = rr;
+    if (scrapRowL<0 && v.includes('報廢')) scrapRowL = rr;
+    if (overRowL<0 && v.includes('超用')) overRowL = rr;
   }
   if (scrapRowL>=0 && overRowL>=0) break;
 }
 
-const scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 3) : 0;
-const overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 3) : 0;
+// Read amount near amtC; allow larger step because merged cells can shift the numeric cell right.
+let scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 8) : 0;
+let overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 8) : 0;
+
+// Fallback: if still zero but label row exists, scan around amtC (left/right) for the nearest numeric value.
+function nearestNumberAround(rr, cc){
+  const row = rows[rr]||[];
+  let best = {dist: 1e9, val: 0};
+  for (let c=Math.max(0, cc-6); c<=Math.min(row.length-1, cc+12); c++){
+    const n = asNumber(row[c]);
+    if (!Number.isFinite(n)) continue;
+    const d = Math.abs(c-cc);
+    if (d < best.dist){
+      best = {dist: d, val: n};
+    }
+  }
+  return best.val;
+}
+if (scrapRowL>=0 && (!Number.isFinite(scrapAmt) || scrapAmt===0)) scrapAmt = nearestNumberAround(scrapRowL, amtC);
+if (overRowL>=0 && (!Number.isFinite(overuseAmt) || overuseAmt===0)) overuseAmt = nearestNumberAround(overRowL, amtC);
 
 out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
       }
