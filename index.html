@@ -497,14 +497,8 @@ function fallbackScanAmountRight(sheet, r, c){
       </div>
     </div>
 
-    <!-- Semi-product expansion -->
-    <div class="mt-4 card p-4">
-      <div class="flex flex-col gap-3">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-semibold">
-<!-- Top20 Expand Panel -->
-<div id="top20Expand" class="hidden mt-6">
+    <!-- Top20 Expand Panel -->
+<div id="top20Expand" class="hidden mt-4 card p-4">
   <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
       <div>
@@ -541,6 +535,13 @@ function fallbackScanAmountRight(sheet, r, c){
   </div>
 </div>
 
+
+<!-- Semi-product expansion -->
+    <div class="mt-4 card p-4">
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">
 半成品展開</div>
 </div>
           <div class="flex flex-wrap gap-2 items-center">
@@ -1249,8 +1250,19 @@ function inferMonthKeyFromFileName(fileName){
 }
 
 
+
+function monthKeyFromRangeKey(rangeKey, fileName){
+  const y = (safeStr(fileName).match(/(20\d{2})/)||[])[1];
+  if (!y || !rangeKey) return null;
+  const parts = String(rangeKey).split('-');
+  if (parts.length !== 2) return null;
+  const end = parts[1];
+  if (!end || end.length !== 4) return null;
+  const mm = end.slice(0,2);
+  return y + '-' + mm;
+}
+
 function parseTop20FromWB(wb, fileName){
-  const monthKey = inferMonthKeyFromFileName(fileName); // fallback only (YYYY-MM)
   const out = [];
   for (const kind of ['scrap','over']){
     const sname = findTop20SheetName(wb, kind);
@@ -1259,61 +1271,88 @@ function parseTop20FromWB(wb, fileName){
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
     if (!rows || !rows.length) continue;
 
-    // Header row: contains 月別 + 分析原因 + 原因說明 + 後續對策
-    let hdrR = -1;
-    for (let r=0; r<Math.min(rows.length, 30); r++){
-      const line = (rows[r]||[]).map(v=>normCell(v)).join('|');
-      if (line.includes('月別') && line.includes('分析原因') && line.includes('原因說明') && line.includes('後續對策')){
-        hdrR = r; break;
-      }
-    }
-    if (hdrR < 0) continue;
+    const isRangeCell = (v)=>{
+      const s = safeStr(v).trim();
+      if (!s) return false;
+      // Accept "0203-0209" "0210~0216" and similar
+      if (/^\d{4}\s*[-~～]\s*\d{4}$/.test(s)) return true;
+      // digits-only fallback
+      const dig = normDigits(s);
+      return dig.length >= 8;
+    };
 
-    const headerA = rows[hdrR]||[];
-    const col = (names)=>{
-      for (let c=0;c<headerA.length;c++){
-        const h = normCell(headerA[c]);
+    // Find first data row by locating a row where 月別 column (or any cell) looks like a range
+    let dataStart = -1;
+    for (let r=0; r<rows.length; r++){
+      const row = rows[r]||[];
+      for (let c=0; c<Math.min(row.length, 12); c++){
+        const s = safeStr(row[c]).trim();
+        if (/^\d{4}\s*[-~～]\s*\d{4}$/.test(s)){
+          dataStart = r;
+          break;
+        }
+      }
+      if (dataStart >= 0) break;
+    }
+    if (dataStart < 0) continue;
+
+    // Build combined header labels by stacking header rows (0..dataStart-1)
+    const maxC = Math.max(...rows.slice(0, dataStart).map(r=>(r||[]).length), 0);
+    const colLabels = new Array(maxC).fill("");
+    for (let c=0; c<maxC; c++){
+      const parts = [];
+      for (let r=0; r<dataStart; r++){
+        const v = normCell((rows[r]||[])[c]);
+        if (v) parts.push(v);
+      }
+      colLabels[c] = parts.join("|");
+    }
+
+    const findCol = (needList)=>{
+      for (let c=0; c<colLabels.length; c++){
+        const h = normKey(colLabels[c]);
         if (!h) continue;
-        for (const n of names){
+        for (const n of needList){
           if (h.includes(normKey(n))) return c;
         }
       }
       return -1;
     };
 
-    const cMonth = col(['月別']);
-    const cName  = col(['名稱']);          // 半成品名稱（亦作商品名 fallback）
-    const cAmt   = (kind==='scrap') ? col(['報廢金額']) : col(['超用金額']);
-    const cReason= col(['分析原因']);
-    const cDesc  = col(['原因說明']);
-    const cAct   = col(['後續對策']);
+    const cMonth = findCol(['月別']);
+    const cSemiName = findCol(['半成品|名稱','半成品名稱','半成品','名稱']);
+    const cNoteProd = findCol(['備註商品名稱','備註-商品名稱','備註']);
+    const cReason = findCol(['分析原因']);
+    const cDesc = findCol(['原因說明']);
+    const cAct  = findCol(['後續對策']);
+    const cAmt  = (kind==='scrap') ? findCol(['報廢金額']) : findCol(['超用金額']);
 
-    let lastMonthVal = '';
-    for (let r=hdrR+1; r<rows.length; r++){
+    let lastMonthVal = "";
+    for (let r=dataStart; r<rows.length; r++){
       const row = rows[r]||[];
-
-      const monthValRaw = (cMonth>=0) ? safeStr(row[cMonth]).trim() : '';
+      const monthValRaw = (cMonth>=0) ? safeStr(row[cMonth]).trim() : "";
       if (monthValRaw) lastMonthVal = monthValRaw;
       const rangeKey = rangeKeyFromMonthCell(lastMonthVal) || null;
 
-      const name = safeStr(row[cName]).trim();
+      const semi = safeStr(row[cSemiName]).trim();
+      const prodNote = safeStr(row[cNoteProd]).trim();
+      const product = prodNote || semi;
+
       const reason = safeStr(row[cReason]).trim();
-      // skip empty lines
-      if (!name && !reason) continue;
+      if (!product && !semi && !reason) continue;
 
       const amt = asNumber(row[cAmt]);
       const desc = safeStr(row[cDesc]).trim();
       const act  = safeStr(row[cAct]).trim();
 
-      // 商品名 / 半成品名：此表以半成品為主，商品名先同名（後續若你要備註-商品名稱可再改）
       out.push({
         kind,
-        monthKey,
         rangeKey,
+        monthKey: monthKeyFromRangeKey(rangeKey, fileName) || inferMonthKeyFromFileName(fileName),
         reason,
-        product: name,
-        semi: name,
-        amt: Number.isFinite(amt)? amt : 0,
+        product,
+        semi: semi || product,
+        amt: Number.isFinite(amt) ? amt : 0,
         desc, act,
         source: safeStr(fileName)
       });
@@ -1321,6 +1360,7 @@ function parseTop20FromWB(wb, fileName){
   }
   return out;
 }
+
 
 
 // return previous-month key based on a date
