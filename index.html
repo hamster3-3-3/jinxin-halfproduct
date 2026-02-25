@@ -651,6 +651,7 @@ function fallbackScanAmountRight(sheet, r, c){
             <tr class="text-left text-slate-600 border-b border-slate-200">
               <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
               <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap text-right">單價</th>
               <th class="py-2 pr-4 whitespace-nowrap" id="top20ExpAmtHeader">報廢金額</th>
               <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
               <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
@@ -1609,6 +1610,7 @@ function parseTop20FromWB(wb, fileName){
     const cDesc = findCol(['原因說明']);
     const cAct  = findCol(['後續對策']);
     const cAmt  = (kind==='scrap') ? findCol(['報廢金額']) : findCol(['超用金額']);
+    const cUnit = findCol(['單價']);
 
     let lastMonthVal = "";
     for (let r=dataStart; r<rows.length; r++){
@@ -1625,6 +1627,7 @@ function parseTop20FromWB(wb, fileName){
       if (!product && !semi && !reason) continue;
 
       const amt = asNumber(row[cAmt]);
+      const unitPrice = (cUnit>=0) ? asNumber(row[cUnit]) : NaN;
       const desc = safeStr(row[cDesc]).trim();
       const act  = safeStr(row[cAct]).trim();
 
@@ -1635,6 +1638,7 @@ function parseTop20FromWB(wb, fileName){
         reason,
         product,
         semi: semi || product,
+        unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
         amt: Number.isFinite(amt) ? amt : 0,
         desc, act,
         source: safeStr(fileName),
@@ -2082,152 +2086,139 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  const sname = findReasonSheetName(wb);
-  if (!sname) return [];
-  const ws = wb.Sheets[sname];
-  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
-  if (!rows || !rows.length) return [];
+  // Parse (7) 原因別分析 from sheet "生產管理報表 7-1 (週)" (or best match).
+  const sheetName = findSheetName(wb, ['生產管理報表 7-1', '7-1', '（週', '(週']);
+  if (!sheetName) return [];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
 
-  const yMatch = safeStr(fileName).match(/(20\d{2})/);
-  const year = yMatch ? Number(yMatch[1]) : null;
-  if (!year) return [];
+  const fileYear = (String(fileName).match(/(20\d{2})/)||[])[1] || null;
+  const mFileRange = String(fileName).match(/(\d{4})\s*[-~～]\s*(\d{4})/);
+  const rangeKey = mFileRange ? (mFileRange[1] + '-' + mFileRange[2]) : null;
 
-  const out = [];
-
-  // helper: find a md range near (r,c) within small window
-  function findNearbyRange(r, c){
-    const winR = 3, winC = 8;
-    for (let rr=Math.max(0,r-winR); rr<=Math.min(rows.length-1,r+winR); rr++){
-      const row = rows[rr]||[];
-      for (let cc=Math.max(0,c-winC); cc<=Math.min(row.length-1,c+winC); cc++){
-        const t = normCell(row[cc]);
-        if (!t) continue;
-        const rng = parseMDRangeFromText(t, year);
-        if (rng) return rng;
+  // 1) locate anchor "(7)原因別分析"
+  let anchorR = -1, anchorC = -1;
+  for (let r=0; r<rows.length; r++){
+    const row = rows[r]||[];
+    for (let c=0; c<row.length; c++){
+      const v = normCell(row[c]);
+      if (!v) continue;
+      if (v.includes('原因別分析') && v.includes('(7')){
+        anchorR = r; anchorC = c; break;
+      }
+      if (v.includes('(7)原因別分析')){
+        anchorR = r; anchorC = c; break;
+      }
+      if (v.includes('原因別分析(') && v.includes('7')){
+        anchorR = r; anchorC = c; break;
       }
     }
-    return null;
+    if (anchorR>=0) break;
+  }
+  if (anchorR<0){
+    // fallback: any cell with "原因別分析"
+    for (let r=0; r<rows.length; r++){
+      const row = rows[r]||[];
+      for (let c=0; c<row.length; c++){
+        const v = normCell(row[c]);
+        if (v && v.includes('原因別分析')){
+          anchorR=r; anchorC=c; break;
+        }
+      }
+      if (anchorR>=0) break;
+    }
+  }
+  if (anchorR<0) return [];
+
+  const TITLES = [
+    '展開量高於105%',
+    '調理多產',
+    '製程不穩',
+    '取樣不穩',
+    '原物料規格',
+    '研發設定',
+    '其他原因',
+    '步留不足'
+  ];
+
+  // 2) find title positions near anchor
+  const titlePos = new Map(); // title -> {r,c}
+  const rFrom = Math.max(0, anchorR-2);
+  const rTo   = Math.min(rows.length-1, anchorR+40);
+  for (let r=rFrom; r<=rTo; r++){
+    const row = rows[r]||[];
+    for (let c=0; c<row.length; c++){
+      const v = normCell(row[c]);
+      if (!v) continue;
+      for (const t of TITLES){
+        if (v === t && !titlePos.has(t)){
+          titlePos.set(t, {r,c});
+        }
+      }
+    }
   }
 
-  // helper: locate first numeric cell to the right within a bound
-  function firstNumberRight(rr, cc, maxStep){
-    const row = rows[rr]||[];
-    for (let k=0;k<=maxStep;k++){
-      const v = (cc+k<row.length)? row[cc+k] : null;
-      const n = asNumber(v);
-      if (Number.isFinite(n) && n!==0) return n;
-      if (Number.isFinite(n) && k===0) return n; // allow 0 if that's the value
+  // helper: find amount under the mini table for a title
+  function findAmtForTitle(pos, label){
+    if (!pos) return 0;
+    const {r:tr, c:tc} = pos;
+
+    // find '金額' header column in a tight neighborhood
+    let amtCol = null;
+    for (let rr=tr; rr<=Math.min(rows.length-1, tr+4); rr++){
+      const row = rows[rr]||[];
+      for (let cc=Math.max(0, tc-2); cc<=Math.min(row.length-1, tc+8); cc++){
+        const v = normCell(row[cc]);
+        if (v === '金額'){ amtCol = cc; break; }
+      }
+      if (amtCol!=null) break;
+    }
+    if (amtCol==null) amtCol = tc+1;
+
+    // find the label row (exact match) close to the mini table
+    for (let rr=tr; rr<=Math.min(rows.length-1, tr+14); rr++){
+      const row = rows[rr]||[];
+      const cStart = Math.max(0, amtCol-4);
+      const cEnd = Math.min(row.length-1, amtCol);
+      for (let cc=cStart; cc<=cEnd; cc++){
+        const v = normCell(row[cc]);
+        if (v !== label) continue;
+        // read number at amtCol (or small shift to right)
+        for (let k=0; k<=4; k++){
+          const vv = row[amtCol+k];
+          if (vv==null) continue;
+          const s = String(vv).trim();
+          if (!s) continue;
+          if (s.includes('%')) continue;
+          const num = asNumber(vv);
+          if (!Number.isFinite(num)) continue;
+          if (num < 0) continue;
+          return num;
+        }
+        return 0;
+      }
     }
     return 0;
   }
 
-  // For each section that contains 原因別分析, extract 8 blocks
-  for (let r0=0;r0<rows.length;r0++){
-    const row0 = rows[r0]||[];
-    for (let c0=0;c0<row0.length;c0++){
-      const txt = normCell(row0[c0]);
-      if (!txt || !txt.includes('原因別分析')) continue;
-
-      const rng = parseMDRangeFromText(txt, year) || findNearbyRange(r0, c0);
-      if (!rng) continue;
-
-      // locate positions of each reason header inside window
-      const pos = {}; // key -> {r,c}
-      const rMax = Math.min(rows.length, r0+55);
-      for (let rr=r0; rr<rMax; rr++){
-        const row = rows[rr]||[];
-        for (let cc=0; cc<row.length; cc++){
-          const v = normCell(row[cc]);
-          if (!v) continue;
-          for (const def of REASON_DEFS){
-            if (pos[def.key]) continue;
-            for (const t of def.tokens){
-              if (v.includes(t)){
-                pos[def.key] = {r: rr, c: cc};
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      // For each reason: pick amount cell
-      for (const def of REASON_DEFS){
-        const p = pos[def.key];
-        if (!p) continue;
-
-        // In the Excel, each reason block has its own 「金額 / 比例」 header.
-// We choose the nearest 「金額」 cell around the reason title so columns won't get cross-wired (top vs bottom row blocks).
-let amtC = p.c;
-{
-  let best = null; // {rr, cc, score}
-  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+4); rr++){
-    const row = rows[rr]||[];
-    const cStart = Math.max(0, p.c-8);
-    const cEnd = Math.min(row.length-1, p.c+10);
-    for (let cc=cStart; cc<=cEnd; cc++){
-      if (normCell(row[cc])==='金額'){
-        const score = Math.abs(cc - p.c) + Math.abs(rr - p.r) * 0.25;
-        if (!best || score < best.score) best = {rr, cc, score};
-      }
-    }
+  const out = [];
+  for (const t of TITLES){
+    const pos = titlePos.get(t);
+    const scrapAmt = findAmtForTitle(pos, '報廢');
+    const overuseAmt = findAmtForTitle(pos, '超用');
+    out.push({
+      year: fileYear,
+      monthKey: null,
+      rangeKey: rangeKey,
+      source: fileName,
+      reason: t,
+      scrapAmt,
+      overuseAmt
+    });
   }
-  if (best) amtC = best.cc;
-}
-
-// Extract amounts for 報廢/超用 for this reason block.
-// IMPORTANT: Avoid matching summary rows like「超用前週差異」 with negative numbers.
-// We ONLY accept label cells that equal exactly「報廢」 or「超用」, then scan right for the amount.
-// Extract amounts for 報廢/超用 for THIS reason mini-table.
-// Anchor on the reason title cell (p.r,p.c), locate the '金額' column nearby,
-// then read rows labeled exactly '報廢' / '超用' and take the numeric value under the 金額 column.
-function findAmtByMiniTable(label){
-  // 1) Find 金額 header column near the title
-  let amtCol = null;
-  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+4); rr++){
-    const row = rows[rr]||[];
-    for (let cc=Math.max(0, p.c-3); cc<=Math.min(row.length-1, p.c+8); cc++){
-      const v = normCell(row[cc]);
-      if (v === '金額'){ amtCol = cc; break; }
-    }
-    if (amtCol!=null) break;
-  }
-  if (amtCol==null) amtCol = p.c+1;
-
-  // 2) Find label row within a tight window
-  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+12); rr++){
-    const row = rows[rr]||[];
-    for (let cc=Math.max(0, amtCol-4); cc<=Math.min(row.length-1, amtCol); cc++){
-      const v = normCell(row[cc]);
-      if (v !== label) continue;
-      // 3) Read amount at amtCol (or a few to the right due to merges)
-      for (let k=0; k<=4; k++){
-        const vv = row[amtCol+k];
-        if (vv==null) continue;
-        const s = String(vv).trim();
-        if (!s) continue;
-        if (s.includes('%')) continue;
-        const num = asNumber(vv);
-        if (!Number.isFinite(num)) continue;
-        if (num < 0) continue; // ignore diff-like negatives
-        return num;
-      }
-      return 0;
-    }
-  }
-  return 0;
-}
-
-let scrapAmt = findAmtByMiniTable('報廢');
-let overuseAmt = findAmtByMiniTable('超用');
-
-out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
-      }
-    }
-  }
-
   return out;
 }
+
 
 async function loadAllData() {
   $('dataStatus').innerHTML = '<span class="loader"></span> 載入中...';
@@ -3883,6 +3874,7 @@ const tbody = $('top20ExpBody');
     tr.innerHTML = `
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.product)}</button></td>
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.semi)}</button></td>
+      <td class="py-2 pr-4 text-right whitespace-nowrap">${(r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—"}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
