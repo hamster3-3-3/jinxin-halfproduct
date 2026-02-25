@@ -2174,26 +2174,38 @@ let amtC = p.c;
   if (best) amtC = best.cc;
 }
 
-// Find nearest 報廢/超用 rows within this mini-table (below header).
-// IMPORTANT: some blocks (esp. 「取樣不穩」) may have merged cells, causing label columns to drift.
-// So we scan a wider horizontal window and only use the row index; amount is still read from amtC.
-let scrapRowL = -1, overRowL = -1;
-for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+18); rr++){
-  const row = rows[rr]||[];
-  const cStart = Math.max(0, p.c-28);
-  const cEnd = Math.min(row.length-1, p.c+10);
-  for (let cc=cStart; cc<=cEnd; cc++){
-    const v = normCell(row[cc]);
-    if (!v) continue;
-    if (scrapRowL<0 && v.includes('報廢')) scrapRowL = rr;
-    if (overRowL<0 && v.includes('超用')) overRowL = rr;
+// Extract amounts for 報廢/超用 for this reason block.
+// IMPORTANT: Avoid matching summary rows like「超用前週差異」 with negative numbers.
+// We ONLY accept label cells that equal exactly「報廢」 or「超用」, then scan right for the amount.
+function findLabelAndAmount(label){
+  const rFrom = Math.max(0, p.r-2);
+  const rTo   = Math.min(rows.length-1, p.r+18);
+  const cFrom = Math.max(0, p.c-28);
+  for (let rr=rFrom; rr<=rTo; rr++){
+    const row = rows[rr]||[];
+    const cTo = Math.min(row.length-1, p.c+10);
+    for (let cc=cFrom; cc<=cTo; cc++){
+      const v = normCell(row[cc]);
+      if (v !== label) continue;
+      // scan right for amount (skip %)
+      for (let k=1; k<=10; k++){
+        const cell = row[cc+k];
+        if (cell==null) continue;
+        const s = String(cell).trim();
+        if (!s) continue;
+        if (s.includes('%')) continue;
+        const n = asNumber(cell);
+        if (!Number.isFinite(n)) continue;
+        if (n < 0) continue; // ignore diff-like negatives
+        return n;
+      }
+    }
   }
-  if (scrapRowL>=0 && overRowL>=0) break;
+  return 0;
 }
 
-// Read amount near amtC; allow larger step because merged cells can shift the numeric cell right.
-let scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 8) : 0;
-let overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 8) : 0;
+let scrapAmt = findLabelAndAmount('報廢');
+let overuseAmt = findLabelAndAmount('超用');
 
 // Fallback: if still zero but label row exists, scan around amtC (left/right) for the nearest numeric value.
 function nearestNumberAround(rr, cc){
