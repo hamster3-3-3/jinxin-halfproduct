@@ -2074,7 +2074,14 @@ function findReasonSheetName(wb){
 
 function rowFindTokenIndex(row, token){
   for (let c=0;c<(row||[]).length;c++) {
-    const v = norfunction parseReasonFromWB(wb, fileName){
+    const v = normCell(row[c]);
+    if (!v) continue;
+    if (v.includes(token)) return c;
+  }
+  return -1;
+}
+
+function parseReasonFromWB(wb, fileName){
   const sname = findReasonSheetName(wb);
   if (!sname) return [];
   const ws = wb.Sheets[sname];
@@ -2166,60 +2173,53 @@ let amtC = p.c;
     }
   }
   if (best) amtC = best.cc;
-}|| score < best.score) best = {rr, cc, score};
-      }
-    }
-  }
-  if (best) amtC = best.cc;
 }
 
 // Extract amounts for 報廢/超用 for this reason block.
 // IMPORTANT: Avoid matching summary rows like「超用前週差異」 with negative numbers.
 // We ONLY accept label cells that equal exactly「報廢」 or「超用」, then scan right for the amount.
-function findLabelAndAmount(label){
-  const rFrom = Math.max(0, p.r-2);
-  const rTo   = Math.min(rows.length-1, p.r+18);
-  const cFrom = Math.max(0, p.c-28);
-  for (let rr=rFrom; rr<=rTo; rr++){
+// Extract amounts for 報廢/超用 for THIS reason mini-table.
+// Anchor on the reason title cell (p.r,p.c), locate the '金額' column nearby,
+// then read rows labeled exactly '報廢' / '超用' and take the numeric value under the 金額 column.
+function findAmtByMiniTable(label){
+  // 1) Find 金額 header column near the title
+  let amtCol = null;
+  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+4); rr++){
     const row = rows[rr]||[];
-    const cTo = Math.min(row.length-1, p.c+10);
-    for (let cc=cFrom; cc<=cTo; cc++){
+    for (let cc=Math.max(0, p.c-3); cc<=Math.min(row.length-1, p.c+8); cc++){
+      const v = normCell(row[cc]);
+      if (v === '金額'){ amtCol = cc; break; }
+    }
+    if (amtCol!=null) break;
+  }
+  if (amtCol==null) amtCol = p.c+1;
+
+  // 2) Find label row within a tight window
+  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+12); rr++){
+    const row = rows[rr]||[];
+    for (let cc=Math.max(0, amtCol-4); cc<=Math.min(row.length-1, amtCol); cc++){
       const v = normCell(row[cc]);
       if (v !== label) continue;
-      // scan right for amount (skip %)
-      for (let k=1; k<=10; k++){
-        const cell = row[cc+k];
-        if (cell==null) continue;
-        const s = String(cell).trim();
+      // 3) Read amount at amtCol (or a few to the right due to merges)
+      for (let k=0; k<=4; k++){
+        const vv = row[amtCol+k];
+        if (vv==null) continue;
+        const s = String(vv).trim();
         if (!s) continue;
         if (s.includes('%')) continue;
-        const n = asNumber(cell);
-        if (!Number.isFinite(n)) continue;
-        if (n < 0) continue; // ignore diff-like negatives
-        return n;
+        const num = asNumber(vv);
+        if (!Number.isFinite(num)) continue;
+        if (num < 0) continue; // ignore diff-like negatives
+        return num;
       }
+      return 0;
     }
   }
   return 0;
 }
 
-let scrapAmt = findLabelAndAmount('報廢');
-let overuseAmt = findLabelAndAmount('超用');
-
-// Fallback: if still zero but label row exists, scan around amtC (left/right) for the nearest numeric value.
-function nearestNumberAround(rr, cc){
-  const row = rows[rr]||[];
-  let best = {dist: 1e9, val: 0};
-  for (let c=Math.max(0, cc-6); c<=Math.min(row.length-1, cc+12); c++){
-    const n = asNumber(row[c]);
-    if (!Number.isFinite(n)) continue;
-    const d = Math.abs(c-cc);
-    if (d < best.dist){
-      best = {dist: d, val: n};
-    }
-  }
-  return best.val;
-}
+let scrapAmt = findAmtByMiniTable('報廢');
+let overuseAmt = findAmtByMiniTable('超用');
 
 out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
       }
