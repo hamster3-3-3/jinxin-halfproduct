@@ -1292,9 +1292,32 @@ function computeActiveJfmSources(){
 
   if (mode === 'week'){
     const rk = weekKeyFromISO(startISO, endISO);
-    const y = String(startISO||'').slice(0,4) || String(state.selection.year||'');
-    if (!rk || !y) return [];
-    const p = idx.weekMap.get(`${y}|${rk}`) || null;
+    const yFromStart = String(startISO||'').slice(0,4);
+    const ySel = String(state.selection.year||'');
+    const y = yFromStart || ySel;
+    if (!rk) return [];
+
+    // 1) exact match: YYYY|MMDD-MMDD (YYYY = week start year)
+    let p = (y ? (idx.weekMap.get(`${y}|${rk}`) || null) : null);
+
+    // 2) fallback: same range exists but stored under different year (cross-year weeks like 1230-0105)
+    if (!p){
+      for (const [k,v] of idx.weekMap.entries()){
+        if (k.endsWith(`|${rk}`)){ p = v; break; }
+      }
+    }
+
+    // 3) fallback: tolerate missing leading zeros (e.g. 127-202)
+    if (!p){
+      const norm = (s)=> String(s||'').replace(/^0+/,'').replace('-0+','-');
+      const rkN = rk.split('-').map(seg=>seg.replace(/^0+/,'')||'0').join('-');
+      for (const [k,v] of idx.weekMap.entries()){
+        const kk = k.split('|')[1] || '';
+        const kkN = kk.split('-').map(seg=>seg.replace(/^0+/,'')||'0').join('-');
+        if (kkN === rkN){ p = v; break; }
+      }
+    }
+
     return p ? [p] : [];
   }
 
