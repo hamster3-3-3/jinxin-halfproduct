@@ -208,11 +208,12 @@ function entryEndBeforeISO(entry, cutoffISO){
 }
 
 
-function makeTop20DupCountBefore(kind, cutoffStartISO){
+function makeTop20DupCountBefore(kind, cutoffStartISO, scopeMonthKey){
   // Count appearances BEFORE the selected range start (dedup by rangeKey).
   const tmp = new Map(); // key -> Set(rangeKey)
   if (!cutoffStartISO) return new Map();
   for (const r of (state.top20Entries||[])){
+    if (scopeMonthKey && r.monthKey && r.monthKey !== scopeMonthKey) continue;
     if (r.kind !== kind) continue;
     if (!entryEndBeforeISO(r, cutoffStartISO)) continue;
     const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
@@ -2073,14 +2074,7 @@ function findReasonSheetName(wb){
 
 function rowFindTokenIndex(row, token){
   for (let c=0;c<(row||[]).length;c++) {
-    const v = normCell(row[c]);
-    if (!v) continue;
-    if (v.includes(token)) return c;
-  }
-  return -1;
-}
-
-function parseReasonFromWB(wb, fileName){
+    const v = norfunction parseReasonFromWB(wb, fileName){
   const sname = findReasonSheetName(wb);
   if (!sname) return [];
   const ws = wb.Sheets[sname];
@@ -2168,6 +2162,11 @@ let amtC = p.c;
       if (normCell(row[cc])==='金額'){
         const score = Math.abs(cc - p.c) + Math.abs(rr - p.r) * 0.25;
         if (!best || score < best.score) best = {rr, cc, score};
+      }
+    }
+  }
+  if (best) amtC = best.cc;
+}|| score < best.score) best = {rr, cc, score};
       }
     }
   }
@@ -3864,7 +3863,8 @@ function renderTop20Expand(){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
-  const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO);
+  const scopeMonthKey = (state.selection && state.selection.year && state.selection.month) ? `${state.selection.year}-${String(state.selection.month).padStart(2,'0')}` : null;
+  const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO, scopeMonthKey);
 const tbody = $('top20ExpBody');
   tbody.innerHTML = '';
   if (!rows.length){
