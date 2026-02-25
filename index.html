@@ -2247,6 +2247,7 @@ async function loadAllData() {
   // 原因別分析：同一檔內同一週同一原因可能重複，做 (start,end,reason,source) 去重
   const rm = new Map();
   for (const r of reasons) {
+    if (!r) continue;
     const k = [r.start, r.end, r.reason, r.source].join('|');
     rm.set(k, r);
   }
