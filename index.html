@@ -1367,7 +1367,9 @@ function normalizeHeader(x) {
   return (x ?? '').toString().replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')');
 }
 
-function findSheetName(wb, keyword) {
+function findSheetName(wb, keyword){
+  try{ key = (key==null?'':String(key)); }catch(e){ key=''; }
+
   const k = keyword.replace(/\s+/g,'');
   return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
 }
