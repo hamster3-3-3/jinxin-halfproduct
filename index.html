@@ -2663,107 +2663,83 @@ function computeBounds(values, kind) {
 
 
 function renderReasonCards(rangeStartISO, rangeEndISO){
-  // Sum from Top20 reasons, not from (7)原因別分析
-  const selStart = rangeStartISO;
-  const selEnd   = rangeEndISO;
+  try{
+    // Sum from Top20 reasons, not from (7)原因別分析
+    const selStart = rangeStartISO;
+    const selEnd   = rangeEndISO;
 
-  const sums = {};
-  for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
+    const sums = {};
+    for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-  let entries = Array.isArray(state.top20Entries) ? state.top20Entries : [];
-  const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
-  if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
+    let entries = Array.isArray(state.top20Entries) ? state.top20Entries : [];
+    const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
+    if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
 
-  const y = String(selStart||'').slice(0,4);
-  const m = String(selStart||'').slice(5,7);
-  const monthKey = (y && m) ? `${y}-${m}` : null;
+    const y = String(selStart||'').slice(0,4);
+    const m = String(selStart||'').slice(5,7);
+    const monthKey = (y && m) ? `${y}-${m}` : null;
 
-  const mmdd = (iso) => {
-    const d = parseISO(iso);
-    if (!(d instanceof Date) || isNaN(d)) return '';
-    return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
-  };
-  const rangeKey = (selStart && selEnd) ? (mmdd(selStart) + '-' + mmdd(selEnd)) : null;
+    const mmdd = (iso) => {
+      const d = parseISO(iso);
+      if (!(d instanceof Date) || isNaN(d)) return '';
+      return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    };
+    const rangeKey = (selStart && selEnd) ? (mmdd(selStart) + '-' + mmdd(selEnd)) : null;
 
-  // pick matching top20 entries for current mode
-  let picked = [];
-  if (state.mode === 'week' && rangeKey) {
-    picked = entries.filter(r => r.rangeKey === rangeKey);
-  } else if (state.mode === 'month' && monthKey) {
-    picked = entries.filter(r => r.monthKey === monthKey);
-  } else if (state.mode === 'year' && y) {
-    picked = entries.filter(r => String(r.year||'') === y);
-  } else {
-    if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey);
-    if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey);
-  }
-
-  // Map top20 reason text -> REASON_DEFS key
-  const mapReasonToKey = (txt) => {
-    const t = safeStr(txt).trim();
-    if (!t) return null;
-    for (const def of REASON_DEFS){
-      const title = safeStr(def.title || '').trim();
-      if (title && (t === title || t.includes(title))) return def.key;
+    let picked = [];
+    if (state.mode === 'week' && rangeKey) {
+      picked = entries.filter(r => r.rangeKey === rangeKey);
+    } else if (state.mode === 'month' && monthKey) {
+      picked = entries.filter(r => r.monthKey === monthKey);
+    } else if (state.mode === 'year' && y) {
+      picked = entries.filter(r => String(r.year||'') === y);
+    } else {
+      if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey);
+      if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey);
     }
-    return null;
-  };
 
-  for (const r of picked){
-    if (!r) continue;
-    const key = mapReasonToKey(r.reason);
-    if (!key) continue;
-    const amt = Number(r.amt) || 0;
-    if (r.kind === 'scrap') sums[key].scrap += amt;
-    if (r.kind === 'over')  sums[key].over  += amt;
+    // Map top20 reason text -> REASON_DEFS key using tokens/label
+    const mapReasonToKey = (txt) => {
+      const t = safeStr(txt).trim();
+      if (!t) return null;
+      for (const def of REASON_DEFS){
+        const label = safeStr(def.label||'').trim();
+        if (label && (t === label || t.includes(label))) return def.key;
+        const toks = Array.isArray(def.tokens) ? def.tokens : [];
+        for (const tok of toks){
+          const tt = safeStr(tok).trim();
+          if (tt && (t === tt || t.includes(tt))) return def.key;
+        }
+      }
+      return null;
+    };
+
+    for (const r of picked){
+      if (!r) continue;
+      const key = mapReasonToKey(r.reason);
+      if (!key) continue;
+      if (!sums[key]) sums[key] = {scrap:0, over:0};
+      const amt = Number(r.amt) || 0;
+      if (r.kind === 'scrap') sums[key].scrap += amt;
+      if (r.kind === 'over')  sums[key].over  += amt;
+    }
+
+    const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
+    const totalOver  = Object.values(sums).reduce((a,b)=>a+(Number(b.over)||0),0);
+    const pctOrDash = (v, tot) => (tot>0 ? `${(v/tot*100).toFixed(2)}%` : '—');
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    for (const def of REASON_DEFS){
+      const v = sums[def.key] || {scrap:0, over:0};
+      set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
+      set(`r_${def.key}_over_amt`,  fmtMoney(v.over));
+      set(`r_${def.key}_scrap_pct`, pctOrDash(v.scrap, totalScrap));
+      set(`r_${def.key}_over_pct`,  pctOrDash(v.over, totalOver));
+    }
+  }catch(err){
+    console.error('[renderReasonCards] failed', err);
   }
-
-  const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
-  const totalOver  = Object.values(sums).reduce((a,b)=>a+(Number(b.over)||0),0);
-  const pctOrDash = (v, tot) => (tot>0 ? `${(v/tot*100).toFixed(2)}%` : '—');
-
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-
-  // Bind to existing DOM ids (r_*)
-  set('r_above105_scrap_amt', fmtMoney(sums.above105.scrap));
-  set('r_above105_over_amt',  fmtMoney(sums.above105.over));
-  set('r_above105_scrap_pct', pctOrDash(sums.above105.scrap, totalScrap));
-  set('r_above105_over_pct',  pctOrDash(sums.above105.over, totalOver));
-
-  set('r_seasoning_scrap_amt', fmtMoney(sums.seasoning.scrap));
-  set('r_seasoning_over_amt',  fmtMoney(sums.seasoning.over));
-  set('r_seasoning_scrap_pct', pctOrDash(sums.seasoning.scrap, totalScrap));
-  set('r_seasoning_over_pct',  pctOrDash(sums.seasoning.over, totalOver));
-
-  set('r_process_scrap_amt', fmtMoney(sums.process.scrap));
-  set('r_process_over_amt',  fmtMoney(sums.process.over));
-  set('r_process_scrap_pct', pctOrDash(sums.process.scrap, totalScrap));
-  set('r_process_over_pct',  pctOrDash(sums.process.over, totalOver));
-
-  set('r_sample_scrap_amt', fmtMoney(sums.sample.scrap));
-  set('r_sample_over_amt',  fmtMoney(sums.sample.over));
-  set('r_sample_scrap_pct', pctOrDash(sums.sample.scrap, totalScrap));
-  set('r_sample_over_pct',  pctOrDash(sums.sample.over, totalOver));
-
-  set('r_raw_scrap_amt', fmtMoney(sums.raw.scrap));
-  set('r_raw_over_amt',  fmtMoney(sums.raw.over));
-  set('r_raw_scrap_pct', pctOrDash(sums.raw.scrap, totalScrap));
-  set('r_raw_over_pct',  pctOrDash(sums.raw.over, totalOver));
-
-  set('r_rd_scrap_amt', fmtMoney(sums.rd.scrap));
-  set('r_rd_over_amt',  fmtMoney(sums.rd.over));
-  set('r_rd_scrap_pct', pctOrDash(sums.rd.scrap, totalScrap));
-  set('r_rd_over_pct',  pctOrDash(sums.rd.over, totalOver));
-
-  set('r_other_scrap_amt', fmtMoney(sums.other.scrap));
-  set('r_other_over_amt',  fmtMoney(sums.other.over));
-  set('r_other_scrap_pct', pctOrDash(sums.other.scrap, totalScrap));
-  set('r_other_over_pct',  pctOrDash(sums.other.over, totalOver));
-
-  set('r_retention_scrap_amt', fmtMoney(sums.retention.scrap));
-  set('r_retention_over_amt',  fmtMoney(sums.retention.over));
-  set('r_retention_scrap_pct', pctOrDash(sums.retention.scrap, totalScrap));
-  set('r_retention_over_pct',  pctOrDash(sums.retention.over, totalOver));
 }
 
 
