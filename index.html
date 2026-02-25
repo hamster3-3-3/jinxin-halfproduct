@@ -2221,8 +2221,6 @@ function nearestNumberAround(rr, cc){
   }
   return best.val;
 }
-if (scrapRowL>=0 && (!Number.isFinite(scrapAmt) || scrapAmt===0)) scrapAmt = nearestNumberAround(scrapRowL, amtC);
-if (overRowL>=0 && (!Number.isFinite(overuseAmt) || overuseAmt===0)) overuseAmt = nearestNumberAround(overRowL, amtC);
 
 out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
       }
