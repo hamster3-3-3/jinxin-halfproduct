@@ -2088,138 +2088,89 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  // Parse (7) 原因別分析 from sheet "生產管理報表 7-1 (週)" (or best match).
-  const sheetName = findSheetName(wb, ['生產管理報表 7-1', '7-1', '（週', '(週']);
-  if (!sheetName) return [];
+  // Deterministic parser for 「生產管理報表 7-1 (週)」 sheet blocks:
+  // Each block starts with: （７）原因別分析(M/D-M/D)
+  // Then amounts are in fixed offsets:
+  // - Scrap row: start+6, Overuse row: start+7 (reasons 1~4 at cols F,H,J,L)
+  // - Scrap row: start+11, Overuse row: start+12 (reasons 5~8 at cols F,H,J,L)
+  const sheetName = findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
+  if (!sheetName) return null;
   const ws = wb.Sheets[sheetName];
+  if (!ws) return null;
+
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+  if (!rows || !rows.length) return null;
 
-  const fileYear = (String(fileName).match(/(20\d{2})/)||[])[1] || null;
-  const mFileRange = String(fileName).match(/(\d{4})\s*[-~～]\s*(\d{4})/);
-  const rangeKey = mFileRange ? (mFileRange[1] + '-' + mFileRange[2]) : null;
+  const sel = state.selection || {};
+  // build M/D-M/D without leading zeros
+  function md(d){
+    if(!d) return '';
+    const dt = (d instanceof Date) ? d : parseISODate(d);
+    if(!dt) return '';
+    return `${dt.getMonth()+1}/${dt.getDate()}`;
+  }
+  const rangeStr = `${md(sel.startISO)}-${md(sel.endISO)}`; // e.g. 2/3-2/9
+  const title = `（７）原因別分析(${rangeStr})`;
 
-  // 1) locate anchor "(7)原因別分析"
-  let anchorR = -1, anchorC = -1;
-  for (let r=0; r<rows.length; r++){
+  // find block start row by exact match, otherwise try loose match ignoring spaces and fullwidth
+  function normTitle(t){
+    return String(t||'').replace(/\s+/g,'').replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
+      .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7').replace(/８/g,'8').replace(/９/g,'9');
+  }
+  const want = normTitle(title);
+  let startRow = -1;
+  for(let r=0;r<rows.length;r++){
+    const v = rows[r] && rows[r][0];
+    if (!v) continue;
+    const nv = normTitle(v);
+    if (nv === want){ startRow = r; break; }
+  }
+  if (startRow<0){
+    // fallback: if selection not set (e.g. year mode), pick the latest block in sheet
+    for(let r=rows.length-1; r>=0; r--){
+      const v = rows[r] && rows[r][0];
+      if (typeof v === 'string' && v.includes('（７）原因別分析(')){ startRow = r; break; }
+    }
+  }
+  if (startRow<0) return null;
+
+  // helper to read numeric from cell
+  function cellNum(r,c){
+    if(r<0||c<0) return 0;
     const row = rows[r]||[];
-    for (let c=0; c<row.length; c++){
-      const v = normCell(row[c]);
-      if (!v) continue;
-      if (v.includes('原因別分析') && v.includes('(7')){
-        anchorR = r; anchorC = c; break;
-      }
-      if (v.includes('(7)原因別分析')){
-        anchorR = r; anchorC = c; break;
-      }
-      if (v.includes('原因別分析(') && v.includes('7')){
-        anchorR = r; anchorC = c; break;
-      }
-    }
-    if (anchorR>=0) break;
+    const v = row[c];
+    const n = asNumber(v);
+    return Number.isFinite(n) ? n : 0;
   }
-  if (anchorR<0){
-    // fallback: any cell with "原因別分析"
-    for (let r=0; r<rows.length; r++){
-      const row = rows[r]||[];
-      for (let c=0; c<row.length; c++){
-        const v = normCell(row[c]);
-        if (v && v.includes('原因別分析')){
-          anchorR=r; anchorC=c; break;
-        }
-      }
-      if (anchorR>=0) break;
-    }
-  }
-  if (anchorR<0) return [];
+  // columns F,H,J,L in 0-index => 5,7,9,11
+  const cols = [5,7,9,11];
 
-  const TITLES = [
-    '展開量高於105%',
-    '調理多產',
-    '製程不穩',
-    '取樣不穩',
-    '原物料規格',
-    '研發設定',
-    '其他原因',
-    '步留不足'
+  const labels = [
+    '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
+    '原物料規格', '研發設定', '其他原因', '步留不足'
   ];
 
-  // 2) find title positions near anchor
-  const titlePos = new Map(); // title -> {r,c}
-  const rFrom = Math.max(0, anchorR-2);
-  const rTo   = Math.min(rows.length-1, anchorR+40);
-  for (let r=rFrom; r<=rTo; r++){
-    const row = rows[r]||[];
-    for (let c=0; c<row.length; c++){
-      const v = normCell(row[c]);
-      if (!v) continue;
-      for (const t of TITLES){
-        if (v === t && !titlePos.has(t)){
-          titlePos.set(t, {r,c});
-        }
-      }
-    }
-  }
-
-  // helper: find amount under the mini table for a title
-  function findAmtForTitle(pos, label){
-    if (!pos) return 0;
-    const {r:tr, c:tc} = pos;
-
-    // find '金額' header column in a tight neighborhood
-    let amtCol = null;
-    for (let rr=tr; rr<=Math.min(rows.length-1, tr+4); rr++){
-      const row = rows[rr]||[];
-      for (let cc=Math.max(0, tc-2); cc<=Math.min(row.length-1, tc+8); cc++){
-        const v = normCell(row[cc]);
-        if (v === '金額'){ amtCol = cc; break; }
-      }
-      if (amtCol!=null) break;
-    }
-    if (amtCol==null) amtCol = tc+1;
-
-    // find the label row (exact match) close to the mini table
-    for (let rr=tr; rr<=Math.min(rows.length-1, tr+14); rr++){
-      const row = rows[rr]||[];
-      const cStart = Math.max(0, amtCol-4);
-      const cEnd = Math.min(row.length-1, amtCol);
-      for (let cc=cStart; cc<=cEnd; cc++){
-        const v = normCell(row[cc]);
-        if (v !== label) continue;
-        // read number at amtCol (or small shift to right)
-        for (let k=0; k<=4; k++){
-          const vv = row[amtCol+k];
-          if (vv==null) continue;
-          const s = String(vv).trim();
-          if (!s) continue;
-          if (s.includes('%')) continue;
-          const num = asNumber(vv);
-          if (!Number.isFinite(num)) continue;
-          if (num < 0) continue;
-          return num;
-        }
-        return 0;
-      }
-    }
-    return 0;
-  }
+  const scrap1 = startRow + 6;
+  const over1  = startRow + 7;
+  const scrap2 = startRow + 11;
+  const over2  = startRow + 12;
 
   const out = [];
-  for (const t of TITLES){
-    const pos = titlePos.get(t);
-    const scrapAmt = findAmtForTitle(pos, '報廢');
-    const overuseAmt = findAmtForTitle(pos, '超用');
+  for(let i=0;i<8;i++){
+    const block = (i<4) ? 0 : 1;
+    const idx = (i<4) ? i : i-4;
+    const rS = block===0 ? scrap1 : scrap2;
+    const rO = block===0 ? over1  : over2;
+    const cA = cols[idx];
     out.push({
-      year: fileYear,
-      monthKey: null,
-      rangeKey: rangeKey,
-      source: fileName,
-      reason: t,
-      scrapAmt,
-      overuseAmt
+      key: labels[i],
+      scrapAmt: cellNum(rS, cA),
+      overuseAmt: cellNum(rO, cA)
     });
   }
   return out;
 }
+
 
 
 async function loadAllData() {
