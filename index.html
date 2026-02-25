@@ -185,6 +185,18 @@ function rangeKeyToDates(year, rangeKey){
   return {start, end};
 }
 
+
+
+function rangesOverlapMMDD(a, b){
+  // a,b: "MMDD-MMDD"
+  if (!a || !b) return false;
+  const y = 2024; // compare month/day only
+  const da = rangeKeyToDates(y, a);
+  const db = rangeKeyToDates(y, b);
+  if (!da || !db) return false;
+  return da.start <= db.end && db.start <= da.end;
+}
+
 function entryEndBeforeISO(entry, cutoffISO){
   if (!entry || !entry.rangeKey || !cutoffISO) return false;
   const y = entry.year || (safeStr(entry.source).match(/(20\d{2})/)||[])[1];
@@ -1602,7 +1614,7 @@ function parseTop20FromWB(wb, fileName){
       const row = rows[r]||[];
       const monthValRaw = (cMonth>=0) ? safeStr(row[cMonth]).trim() : "";
       if (monthValRaw) lastMonthVal = monthValRaw;
-      const rangeKey = rangeKeyFromMonthCell(lastMonthVal) || fileRangeKey || null;
+      const rangeKey = fileRangeKey || rangeKeyFromMonthCell(lastMonthVal) || null;
 
       const semi = safeStr(row[cSemiName]).trim();
       const prodNote = safeStr(row[cNoteProd]).trim();
@@ -3837,8 +3849,8 @@ function renderTop20Expand(){
   if (act.length) rows = rows.filter(r => act.includes(r.source));
 
   if (rangeKey){
-    rows = rows.filter(r => r.rangeKey && r.rangeKey===rangeKey);
-  } else if (monthKey){
+    rows = rows.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
+} else if (monthKey){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
