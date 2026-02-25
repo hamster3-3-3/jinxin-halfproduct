@@ -1199,6 +1199,156 @@ async function loadManifest() {
   return [];
 }
 
+// ---------------- JFM 檔名索引（週別 / 月別） ----------------
+function baseName(p){ return String(p || '').split('/').pop(); }
+
+function isJfmFile(p){
+  const n = baseName(p);
+  return /【JFM指導】/.test(n) && /生產管理報表/.test(n) && /\.xlsx$/i.test(n);
+}
+function isWasteFile(p){
+  const n = baseName(p);
+  return /晉欣半成品報廢管理表\.xlsx$/i.test(n);
+}
+
+function toMMDD(d){
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return mm + dd;
+}
+function weekKeyFromISO(startISO, endISO){
+  const s = parseISO(startISO);
+  const e = parseISO(endISO);
+  if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return null;
+  return `${toMMDD(s)}-${toMMDD(e)}`;
+}
+
+function buildJfmIndex(files){
+  const weekMap = new Map();   // key: `${YYYY}|${MMDD-MMDD}` -> path
+  const monthMap = new Map();  // key: `YYYY-MM` -> path
+  const weeks = [];            // [{path, year, rangeKey, startISO, endISO}]
+  const months = [];           // [{path, monthKey}]
+  for (const fp of (files||[])){
+    const n = baseName(fp);
+
+    // 週檔：2025.1118-1124
+    let m = n.match(/生產管理報表(20\d{2})\.(\d{4})-(\d{4})\.xlsx/i);
+    if (m){
+      const y = Number(m[1]);
+      const a = m[2], b = m[3];
+      const sm = Number(a.slice(0,2)), sd = Number(a.slice(2,4));
+      const em = Number(b.slice(0,2)), ed = Number(b.slice(2,4));
+      const s = new Date(y, sm-1, sd);
+      let ey = y;
+      if (em < sm || (em===sm && ed < sd)) ey = y + 1; // cross-year
+      const e = new Date(ey, em-1, ed);
+      const startISO = toISO(s);
+      const endISO = toISO(e);
+      const rangeKey = `${a}-${b}`;
+      weekMap.set(`${y}|${rangeKey}`, fp);
+      weeks.push({path: fp, year: y, rangeKey, startISO, endISO});
+      continue;
+    }
+
+    // 月檔：2025.11
+    m = n.match(/生產管理報表(20\d{2})\.(\d{2})\.xlsx/i);
+    if (m){
+      const y = m[1];
+      const mm = m[2];
+      const monthKey = `${y}-${mm}`;
+      monthMap.set(monthKey, fp);
+      months.push({path: fp, monthKey});
+      continue;
+    }
+  }
+
+  weeks.sort((a,b)=>safeLocaleCompare(a.startISO, b.startISO));
+  months.sort((a,b)=>safeLocaleCompare(a.monthKey, b.monthKey));
+  return { weekMap, monthMap, weeks, months };
+}
+
+// 依目前時間模式，決定「原因卡片/前20大」要用哪一份（或哪些份）JFM 檔
+function computeActiveJfmSources(){
+  const idx = state.jfmIndex;
+  if (!idx) return [];
+
+  const mode = state.mode;
+  const {start, end} = getDateRange();
+  const startISO = start, endISO = end;
+
+  if (mode === 'week'){
+    const rk = weekKeyFromISO(startISO, endISO);
+    const y = String(startISO||'').slice(0,4) || String(state.selection.year||'');
+    if (!rk || !y) return [];
+    const p = idx.weekMap.get(`${y}|${rk}`) || null;
+    return p ? [p] : [];
+  }
+
+  if (mode === 'month'){
+    const y = String(state.selection.year||'');
+    const m = String(state.selection.month||'').padStart(2,'0');
+    const mk = `${y}-${m}`;
+    const p = idx.monthMap.get(mk) || null;
+    if (p) return [p];
+
+    // B) 月檔不存在：改用「所有與該月有任一天重疊」的週檔
+    const ms = new Date(Number(y), Number(m)-1, 1);
+    const me = new Date(Number(y), Number(m), 0);
+    const out = [];
+    for (const w of idx.weeks){
+      const ws = parseISO(w.startISO);
+      const we = parseISO(w.endISO);
+      if (!(ws instanceof Date) || isNaN(ws) || !(we instanceof Date) || isNaN(we)) continue;
+      if (!(we < ms || ws > me)) out.push(w.path);
+    }
+    return out;
+  }
+
+  if (mode === 'year'){
+    const y = String(state.selection.year||'');
+    const outM = [];
+    for (let mm=1; mm<=12; mm++){
+      const mk = `${y}-${String(mm).padStart(2,'0')}`;
+      if (idx.monthMap.has(mk)) outM.push(idx.monthMap.get(mk));
+    }
+    if (outM.length) return outM;
+
+    const ys = new Date(Number(y),0,1);
+    const ye = new Date(Number(y),11,31);
+    const out = [];
+    for (const w of idx.weeks){
+      const ws = parseISO(w.startISO);
+      const we = parseISO(w.endISO);
+      if (!(ws instanceof Date) || isNaN(ws) || !(we instanceof Date) || isNaN(we)) continue;
+      if (!(we < ys || ws > ye)) out.push(w.path);
+    }
+    return out;
+  }
+
+  // day / range：優先用該月月檔；若無，則用與該月重疊的週檔
+  const mk = (startISO || '').slice(0,7);
+  if (mk && idx.monthMap.has(mk)) return [idx.monthMap.get(mk)];
+
+  if (mk){
+    const y = Number(mk.slice(0,4));
+    const m = Number(mk.slice(5,7));
+    const ms = new Date(y, m-1, 1);
+    const me = new Date(y, m, 0);
+    const out = [];
+    for (const w of idx.weeks){
+      const ws = parseISO(w.startISO);
+      const we = parseISO(w.endISO);
+      if (!(ws instanceof Date) || isNaN(ws) || !(we instanceof Date) || isNaN(we)) continue;
+      if (!(we < ms || ws > me)) out.push(w.path);
+    }
+    return out;
+  }
+
+  return [];
+}
+// ------------------------------------------------------------
+
+
 function normalizeHeader(x) {
   return (x ?? '').toString().replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')');
 }
@@ -2070,6 +2220,7 @@ async function loadAllData() {
   ]);
   await ensureLibGlobal('Chart', [
     './chart.umd.min.js',
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
@@ -2078,21 +2229,48 @@ async function loadAllData() {
 
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
+  state.manifestFiles = files.slice();
 
+  const wasteFiles = files.filter(isWasteFile);
+  const jfmFiles = files.filter(isJfmFile);
+  state.jfmIndex = buildJfmIndex(jfmFiles);
+
+  const loadErrors = [];
   let sum = [];
   let det = [];
   let reasons = [];
   let top20 = [];
-  for (const f of files) {
-    const url = './data/' + encodePath(f);
-    const r = await fetch(url, {cache:'no-store'});
-    if (!r.ok) throw new Error('讀取失敗：' + f);
-    const ab = await r.arrayBuffer();
-    const wb = XLSX.read(ab, {type:'array', cellDates:true});
-    sum = sum.concat(parseSummaryFromWB(wb, f));
-    det = det.concat(parseDetailsFromWB(wb, f));
-    reasons = reasons.concat(parseReasonFromWB(wb, f));
-    top20 = top20.concat(parseTop20FromWB(wb, f));
+
+  // 只解析「報廢管理表」的日別資料，避免 JFM 檔造成日別去重覆蓋不一致
+  for (const f of wasteFiles) {
+    try{
+      const url = './data/' + encodePath(f);
+      const r = await fetch(url, {cache:'no-store'});
+      if (!r.ok) throw new Error('讀取失敗：' + f);
+      const ab = await r.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array', cellDates:true});
+      sum = sum.concat(parseSummaryFromWB(wb, f));
+      det = det.concat(parseDetailsFromWB(wb, f));
+    }catch(e){
+      console.warn(e);
+      loadErrors.push(f);
+    }
+  }
+
+  // 解析所有 JFM 檔（原因卡片 + 前20大 + 重複次數判定需要歷史）
+  for (const f of jfmFiles) {
+    try{
+      const url = './data/' + encodePath(f);
+      const r = await fetch(url, {cache:'no-store'});
+      if (!r.ok) throw new Error('讀取失敗：' + f);
+      const ab = await r.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array', cellDates:true});
+      reasons = reasons.concat(parseReasonFromWB(wb, f));
+      top20 = top20.concat(parseTop20FromWB(wb, f));
+    }catch(e){
+      console.warn(e);
+      loadErrors.push(f);
+    }
   }
 
   // dedupe summary by date (keep last)
@@ -2101,17 +2279,17 @@ async function loadAllData() {
   state.summary = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   state.details = det.sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
-  // 原因別分析：依 (週起-週迄, 原因) 去重（同 key 以最後一筆為準）
+  // 原因別分析：同一檔內同一週同一原因可能重複，做 (start,end,reason,source) 去重
   const rm = new Map();
   for (const r of reasons) {
-    const k = [r.start, r.end, r.reason].join('|');
+    const k = [r.start, r.end, r.reason, r.source].join('|');
     rm.set(k, r);
   }
   state.reasonWeeks = Array.from(rm.values());
 
-
-  // Top20 原因別分析
+  // Top20 原因別分析（保留全部，重複次數判定要用）
   state.top20Entries = top20;
+
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   state.dateMin = state.summary[0].date;
   state.dateMax = state.summary[state.summary.length-1].date;
@@ -2119,7 +2297,14 @@ async function loadAllData() {
   // 等待上市日期表（不影響主資料載入）
   try { await launchPromise; } catch(_) {}
 
-  $('dataStatus').textContent = '已載入 ' + files.length + ' 份檔案';
+  // status
+  const okCount = wasteFiles.length + jfmFiles.length - loadErrors.length;
+  const totalCount = wasteFiles.length + jfmFiles.length;
+  $('dataStatus').textContent = `已載入 ${okCount}/${totalCount} 份檔案（報廢管理表:${wasteFiles.length}、JFM:${jfmFiles.length}）`;
+  if (loadErrors.length){
+    console.warn('讀取失敗清單：', loadErrors);
+    toast(`注意：有 ${loadErrors.length} 份檔案讀取失敗（已略過）`);
+  }
 }
 
 function buildSelectors() {
@@ -2518,7 +2703,9 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
   const sums = {};
   for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-  const entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
+  let entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
+  const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
+  if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
 
   const parseD = (iso) => {
     const d = parseISO(iso);
@@ -3558,28 +3745,30 @@ function syncModeUI() {
 
 
 function openTop20ExpandForReason(reasonKey){
-  state._top20Exp = state._top20Exp || { reasonKey, kind:'scrap' };
-  state._top20Exp.reasonKey = reasonKey;
-  state._top20Exp.kind = 'scrap';
+  // Keep previous kind if panel already opened
+  const prevKind = state._top20Exp?.kind || 'scrap';
 
-  const wkKey = weekRangeKeyFromSelection();
-  const monthKey = (state.mode==='month')
+  state._top20Exp = state._top20Exp || { reasonKey, kind: prevKind };
+  state._top20Exp.reasonKey = reasonKey;
+  state._top20Exp.kind = prevKind;
+
+  const {start: rangeStartISO, end: rangeEndISO} = getDateRange();
+
+  // 週別：固定以「檔名含該週區間」的週檔為準（YYYY.MMDD-MMDD）
+  // 月別：優先用月檔（YYYY.MM）；若無則用「所有與該月重疊」的週檔（B）
+  state.activeJfmSources = computeActiveJfmSources();
+  state._top20Exp.activeSources = Array.isArray(state.activeJfmSources) ? state.activeJfmSources.slice() : [];
+
+  const wkKey = (state.mode === 'week') ? weekKeyFromISO(rangeStartISO, rangeEndISO) : null;
+  const monthKey = (state.mode === 'month')
     ? (String(state.selection.year) + '-' + String(state.selection.month).padStart(2,'0'))
     : null;
 
   state._top20Exp.rangeKey = wkKey;
   state._top20Exp.monthKey = monthKey;
 
-  let endISO = null;
-  if (state.mode==='month'){
-    const y = Number(state.selection.year), m = Number(state.selection.month);
-    endISO = toISO(new Date(y, m, 0));
-  } else if (state.mode==='week'){
-    endISO = state.selection.weekEnd || state.selection.end;
-  } else {
-    endISO = state.selection.end;
-  }
-  state._top20Exp.prevMonthKey = (state.mode==='month' && endISO) ? prevMonthKeyFromISO(endISO) : null;
+  // 重複判定：以「選取區間開始日之前」為界
+  state._top20Exp.cutoffStartISO = rangeStartISO;
 
   const panel = $('top20Expand');
   if (!panel) return;
@@ -3589,7 +3778,7 @@ function openTop20ExpandForReason(reasonKey){
   const subParts = [];
   if (wkKey) subParts.push(`區間：${wkKey.replace('-', '~')}`);
   if (monthKey) subParts.push(`月份：${monthKey}`);
-  if (state._top20Exp.prevMonthKey) subParts.push(`重複判定比對：${state._top20Exp.prevMonthKey}`);
+  subParts.push(`重複判定：選取區間前曾出現`);
   $('top20ExpSubtitle').textContent = subParts.join(' ｜ ');
 
   $('top20ExpTabScrap').onclick = ()=>{ state._top20Exp.kind='scrap'; renderTop20Expand(); };
@@ -3597,7 +3786,6 @@ function openTop20ExpandForReason(reasonKey){
   $('top20ExpClose').onclick = ()=>{ $('top20Expand').classList.add('hidden'); };
 
   renderTop20Expand();
-  panel.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 
@@ -3644,6 +3832,9 @@ function renderTop20Expand(){
   }
 
   let rows = (state.top20Entries||[]).filter(r => r.kind===kind && normKey(r.reason)===normKey(reasonKey));
+
+  const act = Array.isArray(st.activeSources) ? st.activeSources : [];
+  if (act.length) rows = rows.filter(r => act.includes(r.source));
 
   if (rangeKey){
     rows = rows.filter(r => r.rangeKey && r.rangeKey===rangeKey);
@@ -3722,6 +3913,8 @@ function applySelectionFromUI(){
     } else if (state.mode === 'year'){
       // year mode uses year only
     }
+    // Recompute active JFM source(s) for reason cards / Top20 based on filename rules
+    state.activeJfmSources = computeActiveJfmSources();
 
     // Re-render everything
     renderAll();
