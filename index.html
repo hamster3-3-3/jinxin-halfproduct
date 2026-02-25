@@ -2666,156 +2666,64 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
   const selStart = rangeStartISO;
   const selEnd   = rangeEndISO;
 
+  // Compute 8-reason cards by summing Top20 entries (do NOT parse (7)原因別分析 blocks).
   const sums = {};
   for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-  let entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
+  const top20 = Array.isArray(state.top20Entries) ? state.top20Entries : [];
   const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
+  let entries = top20;
   if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
 
-  const parseD = (iso) => {
+  const y = String(selStart||'').slice(0,4);
+  const m = String(selStart||'').slice(5,7);
+  const monthKey = (y && m) ? `${y}-${m}` : null;
+
+  const mmdd = (iso) => {
     const d = parseISO(iso);
-    return (d instanceof Date && !isNaN(d)) ? d : null;
+    if (!(d instanceof Date) || isNaN(d)) return '';
+    return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
   };
-  const spanDays = (sISO, eISO) => {
-    const s = parseD(sISO), e = parseD(eISO);
-    if (!s || !e) return Infinity;
-    return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
-  };
-  const overlaps = (s1ISO, e1ISO, s2ISO, e2ISO) => {
-    const s1 = parseD(s1ISO), e1 = parseD(e1ISO), s2 = parseD(s2ISO), e2 = parseD(e2ISO);
-    if (!s1 || !e1 || !s2 || !e2) return false;
-    return !(s2 > e1 || e2 < s1);
-  };
-  const covers = (sBigISO, eBigISO, sSmallISO, eSmallISO) => {
-    const sb = parseD(sBigISO), eb = parseD(eBigISO), ss = parseD(sSmallISO), es = parseD(eSmallISO);
-    if (!sb || !eb || !ss || !es) return false;
-    return (sb <= ss) && (eb >= es);
-  };
+  const rangeKey = (selStart && selEnd) ? (mmdd(selStart) + '-' + mmdd(selEnd)) : null;
 
-  const exactEntries = (sISO, eISO) => entries.filter(r => r.start === sISO && r.end === eISO);
-
-  // Pick a single (start,end) range among candidates by: smallest spanDays, then latest end date.
-  const pickBestRange = (cands) => {
-    const byRange = new Map(); // key -> {start,end,span,endT}
-    for (const r of cands) {
-      const key = r.start + '|' + r.end;
-      if (byRange.has(key)) continue;
-      const sp = spanDays(r.start, r.end);
-      const et = parseD(r.end)?.getTime() || 0;
-      byRange.set(key, {start:r.start, end:r.end, span:sp, endT:et});
-    }
-    let best = null;
-    for (const it of byRange.values()) {
-      if (!best || it.span < best.span || (it.span === best.span && it.endT > best.endT)) best = it;
-    }
-    return best;
-  };
-
-  const pickSmallestOverlapRange = (sISO, eISO) => {
-    const cands = entries.filter(r => overlaps(sISO, eISO, r.start, r.end));
-    const best = pickBestRange(cands);
-    return best ? exactEntries(best.start, best.end) : [];
-  };
-
-  const pickSmallestCoverRange = (sISO, eISO) => {
-    const cands = entries.filter(r => covers(r.start, r.end, sISO, eISO));
-    const best = pickBestRange(cands);
-    return best ? exactEntries(best.start, best.end) : [];
-  };
-
-  // Decide which entries to use based on mode:
-  // - week: use exact week range if exists; else pick smallest overlapping range (prefer week over month)
-  // - month: prefer exact month range in that month's workbook; else smallest covering range; else sum weekly ranges overlapping month (span<=10)
-  // - year: prefer month ranges; else sum weekly ranges in year (span<=10) without double counting
-  // - others: pick smallest overlapping range
+  // Filter top20 entries by mode
   let picked = [];
-
-  if (entries.length) {
-    if (state.mode === 'week') {
-      picked = exactEntries(selStart, selEnd);
-      if (!picked.length) picked = pickSmallestOverlapRange(selStart, selEnd);
-    } else if (state.mode === 'month') {
-      picked = exactEntries(selStart, selEnd);
-      if (!picked.length) picked = pickSmallestCoverRange(selStart, selEnd);
-      if (!picked.length) {
-        // fallback: sum weekly blocks in month (including cross-month weeks), exclude month-size blocks
-        picked = entries.filter(r => overlaps(selStart, selEnd, r.start, r.end) && spanDays(r.start, r.end) <= 10);
-      }
-    } else if (state.mode === 'year') {
-      const y = String(selStart).slice(0,4);
-      const used = new Set(); // start|end|reason
-      for (let m=1; m<=12; m++){
-        const mm = String(m).padStart(2,'0');
-        const ms = `${y}-${mm}-01`;
-        const me = toISO(new Date(Number(y), m, 0));
-        let part = exactEntries(ms, me);
-        if (!part.length) {
-          part = entries.filter(r => overlaps(ms, me, r.start, r.end) && spanDays(r.start, r.end) <= 10);
-        }
-        for (const r of part) {
-          const k = r.start + '|' + r.end + '|' + r.reason;
-          if (used.has(k)) continue;
-          used.add(k);
-          picked.push(r);
-        }
-      }
-    } else {
-      picked = pickSmallestOverlapRange(selStart, selEnd);
-    }
+  if (state.mode === 'week' && rangeKey) {
+    picked = entries.filter(r => r.rangeKey === rangeKey);
+  } else if (state.mode === 'month' && monthKey) {
+    picked = entries.filter(r => r.monthKey === monthKey);
+  } else if (state.mode === 'year' && y) {
+    picked = entries.filter(r => String(r.year||'') === y);
+  } else {
+    // fallback: try rangeKey first, else monthKey
+    if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey);
+    if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey);
   }
 
   for (const r of picked) {
-    if (!(r.reason in sums)) continue;
-    sums[r.reason].scrap += Number(r.scrapAmt) || 0;
-    sums[r.reason].over  += Number(r.overuseAmt) || 0;
+    if (!r) continue;
+    const reason = safeStr(r.reason).trim();
+    if (!(reason in sums)) continue;
+    const amt = Number(r.amt) || 0;
+    if (r.kind === 'scrap') sums[reason].scrap += amt;
+    if (r.kind === 'over')  sums[reason].over  += amt;
   }
 
   const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
   const totalOver  = Object.values(sums).reduce((a,b)=>a+(Number(b.over)||0),0);
 
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  const pctOrDash = (num, den) => (den>0 ? fmtPct(num/den) : '—');
 
-  set('r_above105_scrap_amt', fmtMoney(sums.above105.scrap));
-  set('r_above105_over_amt',  fmtMoney(sums.above105.over));
-  set('r_above105_scrap_pct', pctOrDash(sums.above105.scrap, totalScrap));
-  set('r_above105_over_pct',  pctOrDash(sums.above105.over, totalOver));
+  for (const def of REASON_DEFS){
+    const v = sums[def.key] || {scrap:0, over:0};
+    const pS = totalScrap>0 ? (v.scrap/totalScrap*100) : null;
+    const pO = totalOver>0  ? (v.over/totalOver*100) : null;
 
-  set('r_tooMuch_scrap_amt', fmtMoney(sums.tooMuch.scrap));
-  set('r_tooMuch_over_amt',  fmtMoney(sums.tooMuch.over));
-  set('r_tooMuch_scrap_pct', pctOrDash(sums.tooMuch.scrap, totalScrap));
-  set('r_tooMuch_over_pct',  pctOrDash(sums.tooMuch.over, totalOver));
-
-  set('r_process_scrap_amt', fmtMoney(sums.process.scrap));
-  set('r_process_over_amt',  fmtMoney(sums.process.over));
-  set('r_process_scrap_pct', pctOrDash(sums.process.scrap, totalScrap));
-  set('r_process_over_pct',  pctOrDash(sums.process.over, totalOver));
-
-  set('r_sample_scrap_amt', fmtMoney(sums.sample.scrap));
-  set('r_sample_over_amt',  fmtMoney(sums.sample.over));
-  set('r_sample_scrap_pct', pctOrDash(sums.sample.scrap, totalScrap));
-  set('r_sample_over_pct',  pctOrDash(sums.sample.over, totalOver));
-
-  set('r_raw_scrap_amt', fmtMoney(sums.raw.scrap));
-  set('r_raw_over_amt',  fmtMoney(sums.raw.over));
-  set('r_raw_scrap_pct', pctOrDash(sums.raw.scrap, totalScrap));
-  set('r_raw_over_pct',  pctOrDash(sums.raw.over, totalOver));
-
-  set('r_rd_scrap_amt', fmtMoney(sums.rd.scrap));
-  set('r_rd_over_amt',  fmtMoney(sums.rd.over));
-  set('r_rd_scrap_pct', pctOrDash(sums.rd.scrap, totalScrap));
-  set('r_rd_over_pct',  pctOrDash(sums.rd.over, totalOver));
-
-  set('r_other_scrap_amt', fmtMoney(sums.other.scrap));
-  set('r_other_over_amt',  fmtMoney(sums.other.over));
-  set('r_other_scrap_pct', pctOrDash(sums.other.scrap, totalScrap));
-  set('r_other_over_pct',  pctOrDash(sums.other.over, totalOver));
-
-  set('r_retention_scrap_amt', fmtMoney(sums.retention.scrap));
-  set('r_retention_over_amt',  fmtMoney(sums.retention.over));
-  set('r_retention_scrap_pct', pctOrDash(sums.retention.scrap, totalScrap));
-  set('r_retention_over_pct',  pctOrDash(sums.retention.over, totalOver));
+    set(`reason_${def.key}_scrap`, fmtCurrency(v.scrap));
+    set(`reason_${def.key}_over`,  fmtCurrency(v.over));
+    set(`reason_${def.key}_scrapPct`, pS==null ? '—' : `${pS.toFixed(2)}%`);
+    set(`reason_${def.key}_overPct`,  pO==null ? '—' : `${pO.toFixed(2)}%`);
+  }
 }
 
 
