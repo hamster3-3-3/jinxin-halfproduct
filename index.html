@@ -1368,11 +1368,11 @@ function normalizeHeader(x) {
 }
 
 function findSheetName(wb, keyword){
-  try{ key = (key==null?'':String(key)); }catch(e){ key=''; }
-
-  const k = keyword.replace(/\s+/g,'');
-  return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
+  const kw = String(keyword ?? '').replace(/\s+/g,'');
+  if (!wb || !Array.isArray(wb.SheetNames)) return null;
+  return wb.SheetNames.find(n => String(n ?? '').replace(/\s+/g,'').includes(kw)) || null;
 }
+
 
 
 // Parse file start date from filename like "2025-1101-1131晉欣半成品報廢管理表.xlsx"
