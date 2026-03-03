@@ -721,6 +721,7 @@ function fallbackScanAmountRight(sheet, r, c){
                   <th>商品名</th>
                   <th>半成品名</th>
                   <th>上市日期</th>
+                  <th class="text-right">單價</th>
                   <th class="text-right">補單</th>
                   <th class="text-right">實際生產率</th>
                   <th class="text-right">差異金額</th>
@@ -895,6 +896,10 @@ const fmtMoney = (n) => {
   if (!Number.isFinite(n)) return '—';
   const v = Math.round(n);
   return 'NT$ ' + v.toLocaleString('zh-TW');
+};
+const fmtUnitPrice = (n) => {
+  if (!Number.isFinite(n)) return '—';
+  return Number(n).toLocaleString('zh-TW', {minimumFractionDigits:2, maximumFractionDigits:2});
 };
 const fmtPct = (n) => {
   if (!Number.isFinite(n)) return '—';
@@ -2963,7 +2968,9 @@ function aggregateGroups(drows) {
         refillQty: 0,
         diffAmt: 0,
         scrapAmt: 0,
-        overuseAmt: 0
+        overuseAmt: 0,
+        unitPriceSum: 0,
+        unitPriceN: 0
       });
     }
     const o = map.get(key);
@@ -2973,10 +2980,18 @@ function aggregateGroups(drows) {
     o.diffAmt += Math.abs(Number(r.diffAmt) || 0);
     o.scrapAmt += Number(r.scrapAmt) || 0;
     o.overuseAmt += Number(r.overuseAmt) || 0;
+
+    // 單價：來自合計XX分頁 D欄（parseDetailsFromWB 會寫入 r.price / r.unitPrice）
+    const p = Number(r.price ?? r.unitPrice);
+    if (Number.isFinite(p) && p > 0) {
+      o.unitPriceSum += p;
+      o.unitPriceN += 1;
+    }
   }
   const out = Array.from(map.values());
   for (const o of out) {
     o.prodRate = o.order > 0 ? (o.output / o.order) : null;
+    o.unitPrice = o.unitPriceN ? (o.unitPriceSum / o.unitPriceN) : null;
   }
   return out;
 }
@@ -3026,6 +3041,7 @@ function applyGroupFilterAndRender(drows) {
       <td>${r.product}</td>
       <td class="muted">${r.semi}</td>
       <td class="mono">${getLaunchCellHTML(r.product)}</td>
+      <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
       <td class="text-right mono">${fmtInt(r.refillQty)}</td>
       <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
       <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
