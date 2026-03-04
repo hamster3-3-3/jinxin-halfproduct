@@ -208,11 +208,12 @@ function entryEndBeforeISO(entry, cutoffISO){
 }
 
 
-function makeTop20DupCountBefore(kind, cutoffStartISO){
+function makeTop20DupCountBefore(kind, cutoffStartISO, scopeMonthKey){
   // Count appearances BEFORE the selected range start (dedup by rangeKey).
   const tmp = new Map(); // key -> Set(rangeKey)
   if (!cutoffStartISO) return new Map();
   for (const r of (state.top20Entries||[])){
+    if (scopeMonthKey && r.monthKey && r.monthKey !== scopeMonthKey) continue;
     if (r.kind !== kind) continue;
     if (!entryEndBeforeISO(r, cutoffStartISO)) continue;
     const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normKey(r.reason);
@@ -650,6 +651,7 @@ function fallbackScanAmountRight(sheet, r, c){
             <tr class="text-left text-slate-600 border-b border-slate-200">
               <th class="py-2 pr-4 whitespace-nowrap">商品名</th>
               <th class="py-2 pr-4 whitespace-nowrap">半成品名</th>
+              <th class="py-2 pr-4 whitespace-nowrap text-right">單價</th>
               <th class="py-2 pr-4 whitespace-nowrap" id="top20ExpAmtHeader">報廢金額</th>
               <th class="py-2 pr-4 whitespace-nowrap">原因說明</th>
               <th class="py-2 pr-4 whitespace-nowrap">後續對策</th>
@@ -719,6 +721,7 @@ function fallbackScanAmountRight(sheet, r, c){
                   <th>商品名</th>
                   <th>半成品名</th>
                   <th>上市日期</th>
+                  <th class="text-right">單價</th>
                   <th class="text-right">補單</th>
                   <th class="text-right">實際生產率</th>
                   <th class="text-right">差異金額</th>
@@ -893,6 +896,10 @@ const fmtMoney = (n) => {
   if (!Number.isFinite(n)) return '—';
   const v = Math.round(n);
   return 'NT$ ' + v.toLocaleString('zh-TW');
+};
+const fmtUnitPrice = (n) => {
+  if (!Number.isFinite(n)) return '—';
+  return Number(n).toLocaleString('zh-TW', {minimumFractionDigits:2, maximumFractionDigits:2});
 };
 const fmtPct = (n) => {
   if (!Number.isFinite(n)) return '—';
@@ -1290,9 +1297,32 @@ function computeActiveJfmSources(){
 
   if (mode === 'week'){
     const rk = weekKeyFromISO(startISO, endISO);
-    const y = String(startISO||'').slice(0,4) || String(state.selection.year||'');
-    if (!rk || !y) return [];
-    const p = idx.weekMap.get(`${y}|${rk}`) || null;
+    const yFromStart = String(startISO||'').slice(0,4);
+    const ySel = String(state.selection.year||'');
+    const y = yFromStart || ySel;
+    if (!rk) return [];
+
+    // 1) exact match: YYYY|MMDD-MMDD (YYYY = week start year)
+    let p = (y ? (idx.weekMap.get(`${y}|${rk}`) || null) : null);
+
+    // 2) fallback: same range exists but stored under different year (cross-year weeks like 1230-0105)
+    if (!p){
+      for (const [k,v] of idx.weekMap.entries()){
+        if (k.endsWith(`|${rk}`)){ p = v; break; }
+      }
+    }
+
+    // 3) fallback: tolerate missing leading zeros (e.g. 127-202)
+    if (!p){
+      const norm = (s)=> String(s||'').replace(/^0+/,'').replace('-0+','-');
+      const rkN = rk.split('-').map(seg=>seg.replace(/^0+/,'')||'0').join('-');
+      for (const [k,v] of idx.weekMap.entries()){
+        const kk = k.split('|')[1] || '';
+        const kkN = kk.split('-').map(seg=>seg.replace(/^0+/,'')||'0').join('-');
+        if (kkN === rkN){ p = v; break; }
+      }
+    }
+
     return p ? [p] : [];
   }
 
@@ -1365,10 +1395,12 @@ function normalizeHeader(x) {
   return (x ?? '').toString().replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')');
 }
 
-function findSheetName(wb, keyword) {
-  const k = keyword.replace(/\s+/g,'');
-  return wb.SheetNames.find(n => n.replace(/\s+/g,'').includes(k)) || null;
+function findSheetName(wb, keyword){
+  const kw = String(keyword ?? '').replace(/\s+/g,'');
+  if (!wb || !Array.isArray(wb.SheetNames)) return null;
+  return wb.SheetNames.find(n => String(n ?? '').replace(/\s+/g,'').includes(kw)) || null;
 }
+
 
 
 // Parse file start date from filename like "2025-1101-1131晉欣半成品報廢管理表.xlsx"
@@ -1608,6 +1640,7 @@ function parseTop20FromWB(wb, fileName){
     const cDesc = findCol(['原因說明']);
     const cAct  = findCol(['後續對策']);
     const cAmt  = (kind==='scrap') ? findCol(['報廢金額']) : findCol(['超用金額']);
+    const cUnit = findCol(['單價']);
 
     let lastMonthVal = "";
     for (let r=dataStart; r<rows.length; r++){
@@ -1624,6 +1657,7 @@ function parseTop20FromWB(wb, fileName){
       if (!product && !semi && !reason) continue;
 
       const amt = asNumber(row[cAmt]);
+      const unitPrice = (cUnit>=0) ? asNumber(row[cUnit]) : NaN;
       const desc = safeStr(row[cDesc]).trim();
       const act  = safeStr(row[cAct]).trim();
 
@@ -1634,6 +1668,7 @@ function parseTop20FromWB(wb, fileName){
         reason,
         product,
         semi: semi || product,
+        unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
         amt: Number.isFinite(amt) ? amt : 0,
         desc, act,
         source: safeStr(fileName),
@@ -2081,144 +2116,90 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  const sname = findReasonSheetName(wb);
-  if (!sname) return [];
-  const ws = wb.Sheets[sname];
-  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
-  if (!rows || !rows.length) return [];
+  // Deterministic parser for 「生產管理報表 7-1 (週)」 sheet blocks:
+  // Each block starts with: （７）原因別分析(M/D-M/D)
+  // Then amounts are in fixed offsets:
+  // - Scrap row: start+6, Overuse row: start+7 (reasons 1~4 at cols F,H,J,L)
+  // - Scrap row: start+11, Overuse row: start+12 (reasons 5~8 at cols F,H,J,L)
+  const sheetName = findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
+  if (!sheetName) return null;
+  const ws = wb.Sheets[sheetName];
+  if (!ws) return null;
 
-  const yMatch = safeStr(fileName).match(/(20\d{2})/);
-  const year = yMatch ? Number(yMatch[1]) : null;
-  if (!year) return [];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+  if (!rows || !rows.length) return null;
+
+  const sel = state.selection || {};
+  // build M/D-M/D without leading zeros
+  function md(d){
+    if(!d) return '';
+    const dt = (d instanceof Date) ? d : parseISODate(d);
+    if(!dt) return '';
+    return `${dt.getMonth()+1}/${dt.getDate()}`;
+  }
+  const rangeStr = `${md(sel.startISO)}-${md(sel.endISO)}`; // e.g. 2/3-2/9
+  const title = `（７）原因別分析(${rangeStr})`;
+
+  // find block start row by exact match, otherwise try loose match ignoring spaces and fullwidth
+  function normTitle(t){
+    return String(t||'').replace(/\s+/g,'').replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
+      .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7').replace(/８/g,'8').replace(/９/g,'9');
+  }
+  const want = normTitle(title);
+  let startRow = -1;
+  for(let r=0;r<rows.length;r++){
+    const v = rows[r] && rows[r][0];
+    if (!v) continue;
+    const nv = normTitle(v);
+    if (nv === want){ startRow = r; break; }
+  }
+  if (startRow<0){
+    // fallback: if selection not set (e.g. year mode), pick the latest block in sheet
+    for(let r=rows.length-1; r>=0; r--){
+      const v = rows[r] && rows[r][0];
+      if (typeof v === 'string' && v.includes('（７）原因別分析(')){ startRow = r; break; }
+    }
+  }
+  if (startRow<0) return null;
+
+  // helper to read numeric from cell
+  function cellNum(r,c){
+    if(r<0||c<0) return 0;
+    const row = rows[r]||[];
+    const v = row[c];
+    const n = asNumber(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  // columns F,H,J,L in 0-index => 5,7,9,11
+  const cols = [5,7,9,11];
+
+  const labels = [
+    '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
+    '原物料規格', '研發設定', '其他原因', '步留不足'
+  ];
+
+  const scrap1 = startRow + 6;
+  const over1  = startRow + 7;
+  const scrap2 = startRow + 11;
+  const over2  = startRow + 12;
 
   const out = [];
-
-  // helper: find a md range near (r,c) within small window
-  function findNearbyRange(r, c){
-    const winR = 3, winC = 8;
-    for (let rr=Math.max(0,r-winR); rr<=Math.min(rows.length-1,r+winR); rr++){
-      const row = rows[rr]||[];
-      for (let cc=Math.max(0,c-winC); cc<=Math.min(row.length-1,c+winC); cc++){
-        const t = normCell(row[cc]);
-        if (!t) continue;
-        const rng = parseMDRangeFromText(t, year);
-        if (rng) return rng;
-      }
-    }
-    return null;
+  for(let i=0;i<8;i++){
+    const block = (i<4) ? 0 : 1;
+    const idx = (i<4) ? i : i-4;
+    const rS = block===0 ? scrap1 : scrap2;
+    const rO = block===0 ? over1  : over2;
+    const cA = cols[idx];
+    out.push({
+      key: labels[i],
+      scrapAmt: cellNum(rS, cA),
+      overuseAmt: cellNum(rO, cA)
+    });
   }
-
-  // helper: locate first numeric cell to the right within a bound
-  function firstNumberRight(rr, cc, maxStep){
-    const row = rows[rr]||[];
-    for (let k=0;k<=maxStep;k++){
-      const v = (cc+k<row.length)? row[cc+k] : null;
-      const n = asNumber(v);
-      if (Number.isFinite(n) && n!==0) return n;
-      if (Number.isFinite(n) && k===0) return n; // allow 0 if that's the value
-    }
-    return 0;
-  }
-
-  // For each section that contains 原因別分析, extract 8 blocks
-  for (let r0=0;r0<rows.length;r0++){
-    const row0 = rows[r0]||[];
-    for (let c0=0;c0<row0.length;c0++){
-      const txt = normCell(row0[c0]);
-      if (!txt || !txt.includes('原因別分析')) continue;
-
-      const rng = parseMDRangeFromText(txt, year) || findNearbyRange(r0, c0);
-      if (!rng) continue;
-
-      // locate positions of each reason header inside window
-      const pos = {}; // key -> {r,c}
-      const rMax = Math.min(rows.length, r0+55);
-      for (let rr=r0; rr<rMax; rr++){
-        const row = rows[rr]||[];
-        for (let cc=0; cc<row.length; cc++){
-          const v = normCell(row[cc]);
-          if (!v) continue;
-          for (const def of REASON_DEFS){
-            if (pos[def.key]) continue;
-            for (const t of def.tokens){
-              if (v.includes(t)){
-                pos[def.key] = {r: rr, c: cc};
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      // For each reason: pick amount cell
-      for (const def of REASON_DEFS){
-        const p = pos[def.key];
-        if (!p) continue;
-
-        // In the Excel, each reason block has its own 「金額 / 比例」 header.
-// We choose the nearest 「金額」 cell around the reason title so columns won't get cross-wired (top vs bottom row blocks).
-let amtC = p.c;
-{
-  let best = null; // {rr, cc, score}
-  for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+4); rr++){
-    const row = rows[rr]||[];
-    const cStart = Math.max(0, p.c-8);
-    const cEnd = Math.min(row.length-1, p.c+10);
-    for (let cc=cStart; cc<=cEnd; cc++){
-      if (normCell(row[cc])==='金額'){
-        const score = Math.abs(cc - p.c) + Math.abs(rr - p.r) * 0.25;
-        if (!best || score < best.score) best = {rr, cc, score};
-      }
-    }
-  }
-  if (best) amtC = best.cc;
-}
-
-// Find nearest 報廢/超用 rows within this mini-table (below header).
-// IMPORTANT: some blocks (esp. 「取樣不穩」) may have merged cells, causing label columns to drift.
-// So we scan a wider horizontal window and only use the row index; amount is still read from amtC.
-let scrapRowL = -1, overRowL = -1;
-for (let rr=p.r; rr<=Math.min(rows.length-1, p.r+18); rr++){
-  const row = rows[rr]||[];
-  const cStart = Math.max(0, p.c-28);
-  const cEnd = Math.min(row.length-1, p.c+10);
-  for (let cc=cStart; cc<=cEnd; cc++){
-    const v = normCell(row[cc]);
-    if (!v) continue;
-    if (scrapRowL<0 && v.includes('報廢')) scrapRowL = rr;
-    if (overRowL<0 && v.includes('超用')) overRowL = rr;
-  }
-  if (scrapRowL>=0 && overRowL>=0) break;
-}
-
-// Read amount near amtC; allow larger step because merged cells can shift the numeric cell right.
-let scrapAmt = (scrapRowL>=0) ? firstNumberRight(scrapRowL, amtC, 8) : 0;
-let overuseAmt = (overRowL>=0) ? firstNumberRight(overRowL, amtC, 8) : 0;
-
-// Fallback: if still zero but label row exists, scan around amtC (left/right) for the nearest numeric value.
-function nearestNumberAround(rr, cc){
-  const row = rows[rr]||[];
-  let best = {dist: 1e9, val: 0};
-  for (let c=Math.max(0, cc-6); c<=Math.min(row.length-1, cc+12); c++){
-    const n = asNumber(row[c]);
-    if (!Number.isFinite(n)) continue;
-    const d = Math.abs(c-cc);
-    if (d < best.dist){
-      best = {dist: d, val: n};
-    }
-  }
-  return best.val;
-}
-if (scrapRowL>=0 && (!Number.isFinite(scrapAmt) || scrapAmt===0)) scrapAmt = nearestNumberAround(scrapRowL, amtC);
-if (overRowL>=0 && (!Number.isFinite(overuseAmt) || overuseAmt===0)) overuseAmt = nearestNumberAround(overRowL, amtC);
-
-out.push({ start: rng.start, end: rng.end, reason: def.key, scrapAmt, overuseAmt, source: safeStr(fileName) });
-      }
-    }
-  }
-
   return out;
 }
+
+
 
 async function loadAllData() {
   $('dataStatus').innerHTML = '<span class="loader"></span> 載入中...';
@@ -2294,6 +2275,7 @@ async function loadAllData() {
   // 原因別分析：同一檔內同一週同一原因可能重複，做 (start,end,reason,source) 去重
   const rm = new Map();
   for (const r of reasons) {
+    if (!r) continue;
     const k = [r.start, r.end, r.reason, r.source].join('|');
     rm.set(k, r);
   }
@@ -2709,159 +2691,83 @@ function computeBounds(values, kind) {
 
 
 function renderReasonCards(rangeStartISO, rangeEndISO){
-  const selStart = rangeStartISO;
-  const selEnd   = rangeEndISO;
+  try{
+    // Sum from Top20 reasons, not from (7)原因別分析
+    const selStart = rangeStartISO;
+    const selEnd   = rangeEndISO;
 
-  const sums = {};
-  for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
+    const sums = {};
+    for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-  let entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
-  const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
-  if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
+    let entries = Array.isArray(state.top20Entries) ? state.top20Entries : [];
+    const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
+    if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
 
-  const parseD = (iso) => {
-    const d = parseISO(iso);
-    return (d instanceof Date && !isNaN(d)) ? d : null;
-  };
-  const spanDays = (sISO, eISO) => {
-    const s = parseD(sISO), e = parseD(eISO);
-    if (!s || !e) return Infinity;
-    return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
-  };
-  const overlaps = (s1ISO, e1ISO, s2ISO, e2ISO) => {
-    const s1 = parseD(s1ISO), e1 = parseD(e1ISO), s2 = parseD(s2ISO), e2 = parseD(e2ISO);
-    if (!s1 || !e1 || !s2 || !e2) return false;
-    return !(s2 > e1 || e2 < s1);
-  };
-  const covers = (sBigISO, eBigISO, sSmallISO, eSmallISO) => {
-    const sb = parseD(sBigISO), eb = parseD(eBigISO), ss = parseD(sSmallISO), es = parseD(eSmallISO);
-    if (!sb || !eb || !ss || !es) return false;
-    return (sb <= ss) && (eb >= es);
-  };
+    const y = String(selStart||'').slice(0,4);
+    const m = String(selStart||'').slice(5,7);
+    const monthKey = (y && m) ? `${y}-${m}` : null;
 
-  const exactEntries = (sISO, eISO) => entries.filter(r => r.start === sISO && r.end === eISO);
+    const mmdd = (iso) => {
+      const d = parseISO(iso);
+      if (!(d instanceof Date) || isNaN(d)) return '';
+      return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    };
+    const rangeKey = (selStart && selEnd) ? (mmdd(selStart) + '-' + mmdd(selEnd)) : null;
 
-  // Pick a single (start,end) range among candidates by: smallest spanDays, then latest end date.
-  const pickBestRange = (cands) => {
-    const byRange = new Map(); // key -> {start,end,span,endT}
-    for (const r of cands) {
-      const key = r.start + '|' + r.end;
-      if (byRange.has(key)) continue;
-      const sp = spanDays(r.start, r.end);
-      const et = parseD(r.end)?.getTime() || 0;
-      byRange.set(key, {start:r.start, end:r.end, span:sp, endT:et});
-    }
-    let best = null;
-    for (const it of byRange.values()) {
-      if (!best || it.span < best.span || (it.span === best.span && it.endT > best.endT)) best = it;
-    }
-    return best;
-  };
-
-  const pickSmallestOverlapRange = (sISO, eISO) => {
-    const cands = entries.filter(r => overlaps(sISO, eISO, r.start, r.end));
-    const best = pickBestRange(cands);
-    return best ? exactEntries(best.start, best.end) : [];
-  };
-
-  const pickSmallestCoverRange = (sISO, eISO) => {
-    const cands = entries.filter(r => covers(r.start, r.end, sISO, eISO));
-    const best = pickBestRange(cands);
-    return best ? exactEntries(best.start, best.end) : [];
-  };
-
-  // Decide which entries to use based on mode:
-  // - week: use exact week range if exists; else pick smallest overlapping range (prefer week over month)
-  // - month: prefer exact month range in that month's workbook; else smallest covering range; else sum weekly ranges overlapping month (span<=10)
-  // - year: prefer month ranges; else sum weekly ranges in year (span<=10) without double counting
-  // - others: pick smallest overlapping range
-  let picked = [];
-
-  if (entries.length) {
-    if (state.mode === 'week') {
-      picked = exactEntries(selStart, selEnd);
-      if (!picked.length) picked = pickSmallestOverlapRange(selStart, selEnd);
-    } else if (state.mode === 'month') {
-      picked = exactEntries(selStart, selEnd);
-      if (!picked.length) picked = pickSmallestCoverRange(selStart, selEnd);
-      if (!picked.length) {
-        // fallback: sum weekly blocks in month (including cross-month weeks), exclude month-size blocks
-        picked = entries.filter(r => overlaps(selStart, selEnd, r.start, r.end) && spanDays(r.start, r.end) <= 10);
-      }
-    } else if (state.mode === 'year') {
-      const y = String(selStart).slice(0,4);
-      const used = new Set(); // start|end|reason
-      for (let m=1; m<=12; m++){
-        const mm = String(m).padStart(2,'0');
-        const ms = `${y}-${mm}-01`;
-        const me = toISO(new Date(Number(y), m, 0));
-        let part = exactEntries(ms, me);
-        if (!part.length) {
-          part = entries.filter(r => overlaps(ms, me, r.start, r.end) && spanDays(r.start, r.end) <= 10);
-        }
-        for (const r of part) {
-          const k = r.start + '|' + r.end + '|' + r.reason;
-          if (used.has(k)) continue;
-          used.add(k);
-          picked.push(r);
-        }
-      }
+    let picked = [];
+    if (state.mode === 'week' && rangeKey) {
+      picked = entries.filter(r => r.rangeKey === rangeKey);
+    } else if (state.mode === 'month' && monthKey) {
+      picked = entries.filter(r => r.monthKey === monthKey);
+    } else if (state.mode === 'year' && y) {
+      picked = entries.filter(r => String(r.year||'') === y);
     } else {
-      picked = pickSmallestOverlapRange(selStart, selEnd);
+      if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey);
+      if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey);
     }
+
+    // Map top20 reason text -> REASON_DEFS key using tokens/label
+    const mapReasonToKey = (txt) => {
+      const t = safeStr(txt).trim();
+      if (!t) return null;
+      for (const def of REASON_DEFS){
+        const label = safeStr(def.label||'').trim();
+        if (label && (t === label || t.includes(label))) return def.key;
+        const toks = Array.isArray(def.tokens) ? def.tokens : [];
+        for (const tok of toks){
+          const tt = safeStr(tok).trim();
+          if (tt && (t === tt || t.includes(tt))) return def.key;
+        }
+      }
+      return null;
+    };
+
+    for (const r of picked){
+      if (!r) continue;
+      const key = mapReasonToKey(r.reason);
+      if (!key) continue;
+      if (!sums[key]) sums[key] = {scrap:0, over:0};
+      const amt = Number(r.amt) || 0;
+      if (r.kind === 'scrap') sums[key].scrap += amt;
+      if (r.kind === 'over')  sums[key].over  += amt;
+    }
+
+    const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
+    const totalOver  = Object.values(sums).reduce((a,b)=>a+(Number(b.over)||0),0);
+    const pctOrDash = (v, tot) => (tot>0 ? `${(v/tot*100).toFixed(2)}%` : '—');
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    for (const def of REASON_DEFS){
+      const v = sums[def.key] || {scrap:0, over:0};
+      set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
+      set(`r_${def.key}_over_amt`,  fmtMoney(v.over));
+      set(`r_${def.key}_scrap_pct`, pctOrDash(v.scrap, totalScrap));
+      set(`r_${def.key}_over_pct`,  pctOrDash(v.over, totalOver));
+    }
+  }catch(err){
+    console.error('[renderReasonCards] failed', err);
   }
-
-  for (const r of picked) {
-    if (!(r.reason in sums)) continue;
-    sums[r.reason].scrap += Number(r.scrapAmt) || 0;
-    sums[r.reason].over  += Number(r.overuseAmt) || 0;
-  }
-
-  const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
-  const totalOver  = Object.values(sums).reduce((a,b)=>a+(Number(b.over)||0),0);
-
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  const pctOrDash = (num, den) => (den>0 ? fmtPct(num/den) : '—');
-
-  set('r_above105_scrap_amt', fmtMoney(sums.above105.scrap));
-  set('r_above105_over_amt',  fmtMoney(sums.above105.over));
-  set('r_above105_scrap_pct', pctOrDash(sums.above105.scrap, totalScrap));
-  set('r_above105_over_pct',  pctOrDash(sums.above105.over, totalOver));
-
-  set('r_tooMuch_scrap_amt', fmtMoney(sums.tooMuch.scrap));
-  set('r_tooMuch_over_amt',  fmtMoney(sums.tooMuch.over));
-  set('r_tooMuch_scrap_pct', pctOrDash(sums.tooMuch.scrap, totalScrap));
-  set('r_tooMuch_over_pct',  pctOrDash(sums.tooMuch.over, totalOver));
-
-  set('r_process_scrap_amt', fmtMoney(sums.process.scrap));
-  set('r_process_over_amt',  fmtMoney(sums.process.over));
-  set('r_process_scrap_pct', pctOrDash(sums.process.scrap, totalScrap));
-  set('r_process_over_pct',  pctOrDash(sums.process.over, totalOver));
-
-  set('r_sample_scrap_amt', fmtMoney(sums.sample.scrap));
-  set('r_sample_over_amt',  fmtMoney(sums.sample.over));
-  set('r_sample_scrap_pct', pctOrDash(sums.sample.scrap, totalScrap));
-  set('r_sample_over_pct',  pctOrDash(sums.sample.over, totalOver));
-
-  set('r_raw_scrap_amt', fmtMoney(sums.raw.scrap));
-  set('r_raw_over_amt',  fmtMoney(sums.raw.over));
-  set('r_raw_scrap_pct', pctOrDash(sums.raw.scrap, totalScrap));
-  set('r_raw_over_pct',  pctOrDash(sums.raw.over, totalOver));
-
-  set('r_rd_scrap_amt', fmtMoney(sums.rd.scrap));
-  set('r_rd_over_amt',  fmtMoney(sums.rd.over));
-  set('r_rd_scrap_pct', pctOrDash(sums.rd.scrap, totalScrap));
-  set('r_rd_over_pct',  pctOrDash(sums.rd.over, totalOver));
-
-  set('r_other_scrap_amt', fmtMoney(sums.other.scrap));
-  set('r_other_over_amt',  fmtMoney(sums.other.over));
-  set('r_other_scrap_pct', pctOrDash(sums.other.scrap, totalScrap));
-  set('r_other_over_pct',  pctOrDash(sums.other.over, totalOver));
-
-  set('r_retention_scrap_amt', fmtMoney(sums.retention.scrap));
-  set('r_retention_over_amt',  fmtMoney(sums.retention.over));
-  set('r_retention_scrap_pct', pctOrDash(sums.retention.scrap, totalScrap));
-  set('r_retention_over_pct',  pctOrDash(sums.retention.over, totalOver));
 }
 
 
@@ -3062,7 +2968,9 @@ function aggregateGroups(drows) {
         refillQty: 0,
         diffAmt: 0,
         scrapAmt: 0,
-        overuseAmt: 0
+        overuseAmt: 0,
+        unitPriceSum: 0,
+        unitPriceN: 0
       });
     }
     const o = map.get(key);
@@ -3072,10 +2980,18 @@ function aggregateGroups(drows) {
     o.diffAmt += Math.abs(Number(r.diffAmt) || 0);
     o.scrapAmt += Number(r.scrapAmt) || 0;
     o.overuseAmt += Number(r.overuseAmt) || 0;
+
+    // 單價：來自合計XX分頁 D欄（parseDetailsFromWB 會寫入 r.price / r.unitPrice）
+    const p = Number(r.price ?? r.unitPrice);
+    if (Number.isFinite(p) && p > 0) {
+      o.unitPriceSum += p;
+      o.unitPriceN += 1;
+    }
   }
   const out = Array.from(map.values());
   for (const o of out) {
     o.prodRate = o.order > 0 ? (o.output / o.order) : null;
+    o.unitPrice = o.unitPriceN ? (o.unitPriceSum / o.unitPriceN) : null;
   }
   return out;
 }
@@ -3125,6 +3041,7 @@ function applyGroupFilterAndRender(drows) {
       <td>${r.product}</td>
       <td class="muted">${r.semi}</td>
       <td class="mono">${getLaunchCellHTML(r.product)}</td>
+      <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
       <td class="text-right mono">${fmtInt(r.refillQty)}</td>
       <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
       <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
@@ -3854,7 +3771,8 @@ function renderTop20Expand(){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
 
-  const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO);
+  const scopeMonthKey = (state.selection && state.selection.year && state.selection.month) ? `${state.selection.year}-${String(state.selection.month).padStart(2,'0')}` : null;
+  const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO, scopeMonthKey);
 const tbody = $('top20ExpBody');
   tbody.innerHTML = '';
   if (!rows.length){
@@ -3873,6 +3791,7 @@ const tbody = $('top20ExpBody');
     tr.innerHTML = `
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.product)}</button></td>
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.semi)}</button></td>
+      <td class="py-2 pr-4 text-right whitespace-nowrap">${(r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—"}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
