@@ -2131,11 +2131,8 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  // Deterministic parser for 「生產管理報表 7-1 (週)」 sheet blocks:
-  // Each block starts with: （７）原因別分析(M/D-M/D)
-  // Then amounts are in fixed offsets:
-  // - Scrap row: start+6, Overuse row: start+7 (reasons 1~4 at cols F,H,J,L)
-function parseReasonFromWB(wb, fileName){
+  // Parse ALL 「（7）原因別分析(M/D-M/D)」 blocks from 生產管理報表 7-1(週)
+  // so week/month/year views can all aggregate correctly.
   // Parse ALL 「（7）原因別分析(M/D-M/D)」 blocks from 生產管理報表 7-1(週)
   // so week/month/year views can all aggregate correctly.
   const sheetName = findReasonSheetName(wb) || findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
@@ -2712,6 +2709,13 @@ function computeBounds(values, kind) {
 
   // clamp mins (do NOT clamp max for rate; 實際生產率可能 > 100%)
   if (kind === 'amt' || kind === 'qty' || kind === 'rate') mn = Math.max(0, mn);
+
+  // ensure sane ordering
+  if (mx <= mn) mx = mn + 1;
+
+  return { min: mn, max: mx };
+}
+
 function renderReasonCards(rangeStartISO, rangeEndISO){
   try{
     // 原因別分析卡片以「生產管理報表 7-1(週) -> （7）原因別分析」為主來源
@@ -2778,17 +2782,6 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
 
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    for (const def of REASON_DEFS){
-      const v = sums[def.key] || {scrap:0, over:0};
-      set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
-      set(`r_${def.key}_over_amt`,  fmtMoney(v.over));
-      set(`r_${def.key}_scrap_pct`, pctOrDash(v.scrap, totalScrap));
-      set(`r_${def.key}_over_pct`,  pctOrDash(v.over, totalOver));
-    }
-  }catch(err){
-    console.error('[renderReasonCards] failed', err);
-  }
-}
     for (const def of REASON_DEFS){
       const v = sums[def.key] || {scrap:0, over:0};
       set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
