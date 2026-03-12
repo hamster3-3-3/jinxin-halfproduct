@@ -2135,49 +2135,27 @@ function parseReasonFromWB(wb, fileName){
   // Each block starts with: （７）原因別分析(M/D-M/D)
   // Then amounts are in fixed offsets:
   // - Scrap row: start+6, Overuse row: start+7 (reasons 1~4 at cols F,H,J,L)
-  // - Scrap row: start+11, Overuse row: start+12 (reasons 5~8 at cols F,H,J,L)
-  const sheetName = findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
-  if (!sheetName) return null;
+function parseReasonFromWB(wb, fileName){
+  // Parse ALL 「（7）原因別分析(M/D-M/D)」 blocks from 生產管理報表 7-1(週)
+  // so week/month/year views can all aggregate correctly.
+  const sheetName = findReasonSheetName(wb) || findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
+  if (!sheetName) return [];
   const ws = wb.Sheets[sheetName];
-  if (!ws) return null;
+  if (!ws) return [];
 
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
-  if (!rows || !rows.length) return null;
+  if (!rows || !rows.length) return [];
 
-  const sel = state.selection || {};
-  // build M/D-M/D without leading zeros
-  function md(d){
-    if(!d) return '';
-    const dt = (d instanceof Date) ? d : parseISODate(d);
-    if(!dt) return '';
-    return `${dt.getMonth()+1}/${dt.getDate()}`;
-  }
-  const rangeStr = `${md(sel.startISO)}-${md(sel.endISO)}`; // e.g. 2/3-2/9
-  const title = `（７）原因別分析(${rangeStr})`;
+  const fileYear = Number((safeStr(fileName).match(/(20\d{2})/)||[])[1] || '') || null;
 
-  // find block start row by exact match, otherwise try loose match ignoring spaces and fullwidth
   function normTitle(t){
-    return String(t||'').replace(/\s+/g,'').replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
-      .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7').replace(/８/g,'8').replace(/９/g,'9');
+    return String(t||'').replace(/\s+/g,'')
+      .replace(/[（(]/g,'(').replace(/[）)]/g,')')
+      .replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
+      .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7').replace(/８/g,'8').replace(/９/g,'9')
+      .replace(/[～~—－]/g,'-');
   }
-  const want = normTitle(title);
-  let startRow = -1;
-  for(let r=0;r<rows.length;r++){
-    const v = rows[r] && rows[r][0];
-    if (!v) continue;
-    const nv = normTitle(v);
-    if (nv === want){ startRow = r; break; }
-  }
-  if (startRow<0){
-    // fallback: if selection not set (e.g. year mode), pick the latest block in sheet
-    for(let r=rows.length-1; r>=0; r--){
-      const v = rows[r] && rows[r][0];
-      if (typeof v === 'string' && v.includes('（７）原因別分析(')){ startRow = r; break; }
-    }
-  }
-  if (startRow<0) return null;
 
-  // helper to read numeric from cell
   function cellNum(r,c){
     if(r<0||c<0) return 0;
     const row = rows[r]||[];
@@ -2185,31 +2163,64 @@ function parseReasonFromWB(wb, fileName){
     const n = asNumber(v);
     return Number.isFinite(n) ? n : 0;
   }
-  // columns F,H,J,L in 0-index => 5,7,9,11
-  const cols = [5,7,9,11];
 
+  const cols = [5,7,9,11]; // F,H,J,L
   const labels = [
     '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
     '原物料規格', '研發設定', '其他原因', '步留不足'
   ];
 
-  const scrap1 = startRow + 6;
-  const over1  = startRow + 7;
-  const scrap2 = startRow + 11;
-  const over2  = startRow + 12;
-
   const out = [];
-  for(let i=0;i<8;i++){
-    const block = (i<4) ? 0 : 1;
-    const idx = (i<4) ? i : i-4;
-    const rS = block===0 ? scrap1 : scrap2;
-    const rO = block===0 ? over1  : over2;
-    const cA = cols[idx];
-    out.push({
-      key: labels[i],
-      scrapAmt: cellNum(rS, cA),
-      overuseAmt: cellNum(rO, cA)
-    });
+  for(let startRow=0; startRow<rows.length; startRow++){
+    const raw = (rows[startRow] && rows[startRow][0]) || '';
+    const title = normTitle(raw);
+    if (!title.includes('原因別分析(')) continue;
+
+    const m = title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})\)/)
+           || title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\)/);
+    let startISO = null, endISO = null, rangeKey = null, monthKey = null, year = fileYear;
+    if (m && fileYear){
+      let m1, d1, m2, d2;
+      if (m.length >= 5 && m[4] != null){
+        m1 = Number(m[1]); d1 = Number(m[2]); m2 = Number(m[3]); d2 = Number(m[4]);
+      } else {
+        m1 = Number(m[1]); d1 = Number(m[2]); m2 = m1; d2 = Number(m[3]);
+      }
+      let y1 = fileYear, y2 = fileYear;
+      if (m1 === 12 && m2 === 1) y2 = fileYear + 1;
+      if (m1 === 1 && m2 === 12) y1 = fileYear - 1;
+      startISO = toISO(new Date(y1, m1-1, d1));
+      endISO   = toISO(new Date(y2, m2-1, d2));
+      const mmdd = (iso) => {
+        const d = parseISO(iso);
+        return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+      };
+      rangeKey = mmdd(startISO) + '-' + mmdd(endISO);
+      monthKey = endISO ? String(endISO).slice(0,7) : null;
+      year = startISO ? String(startISO).slice(0,4) : fileYear;
+    }
+
+    const scrap1 = startRow + 6, over1 = startRow + 7;
+    const scrap2 = startRow + 11, over2 = startRow + 12;
+
+    for(let i=0;i<8;i++){
+      const block = (i<4) ? 0 : 1;
+      const idx = (i<4) ? i : i-4;
+      const rS = block===0 ? scrap1 : scrap2;
+      const rO = block===0 ? over1  : over2;
+      const cA = cols[idx];
+      out.push({
+        start: startISO,
+        end: endISO,
+        rangeKey,
+        monthKey,
+        year: String(year||''),
+        reason: labels[i],
+        scrapAmt: cellNum(rS, cA),
+        overuseAmt: cellNum(rO, cA),
+        source: safeStr(fileName)
+      });
+    }
   }
   return out;
 }
@@ -2701,27 +2712,16 @@ function computeBounds(values, kind) {
 
   // clamp mins (do NOT clamp max for rate; 實際生產率可能 > 100%)
   if (kind === 'amt' || kind === 'qty' || kind === 'rate') mn = Math.max(0, mn);
-
-  // ensure sane ordering
-  if (mx <= mn) mx = mn + 1;
-
-  return { min: mn, max: mx };
-}
-
-
-
-
-
 function renderReasonCards(rangeStartISO, rangeEndISO){
   try{
-    // Sum from Top20 reasons, not from (7)原因別分析
+    // 原因別分析卡片以「生產管理報表 7-1(週) -> （7）原因別分析」為主來源
     const selStart = rangeStartISO;
     const selEnd   = rangeEndISO;
 
     const sums = {};
     for (const def of REASON_DEFS) sums[def.key] = { scrap: 0, over: 0 };
 
-    let entries = Array.isArray(state.top20Entries) ? state.top20Entries : [];
+    let entries = Array.isArray(state.reasonWeeks) ? state.reasonWeeks : [];
     const actSrc = Array.isArray(state.activeJfmSources) ? state.activeJfmSources : [];
     if (actSrc.length) entries = entries.filter(r => actSrc.includes(r.source));
 
@@ -2738,17 +2738,16 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
 
     let picked = [];
     if (state.mode === 'week' && rangeKey) {
-      picked = entries.filter(r => r.rangeKey === rangeKey);
+      picked = entries.filter(r => r.rangeKey === rangeKey || (r.start === selStart && r.end === selEnd));
     } else if (state.mode === 'month' && monthKey) {
-      picked = entries.filter(r => r.monthKey === monthKey);
+      picked = entries.filter(r => r.monthKey === monthKey || rangeKeyTouchesMonth(r.rangeKey, monthKey));
     } else if (state.mode === 'year' && y) {
-      picked = entries.filter(r => String(r.year||'') === y);
+      picked = entries.filter(r => String(r.year||'') === y || String(r.start||'').slice(0,4) === y || String(r.end||'').slice(0,4) === y);
     } else {
-      if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey);
-      if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey);
+      if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey || (r.start === selStart && r.end === selEnd));
+      if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey || rangeKeyTouchesMonth(r.rangeKey, monthKey));
     }
 
-    // Map top20 reason text -> REASON_DEFS key using tokens/label
     const mapReasonToKey = (txt) => {
       const t = safeStr(txt).trim();
       if (!t) return null;
@@ -2769,9 +2768,8 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
       const key = mapReasonToKey(r.reason);
       if (!key) continue;
       if (!sums[key]) sums[key] = {scrap:0, over:0};
-      const amt = Number(r.amt) || 0;
-      if (r.kind === 'scrap') sums[key].scrap += amt;
-      if (r.kind === 'over')  sums[key].over  += amt;
+      sums[key].scrap += Number(r.scrapAmt) || 0;
+      sums[key].over  += Number(r.overuseAmt) || 0;
     }
 
     const totalScrap = Object.values(sums).reduce((a,b)=>a+(Number(b.scrap)||0),0);
@@ -2780,6 +2778,17 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
 
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
+    for (const def of REASON_DEFS){
+      const v = sums[def.key] || {scrap:0, over:0};
+      set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
+      set(`r_${def.key}_over_amt`,  fmtMoney(v.over));
+      set(`r_${def.key}_scrap_pct`, pctOrDash(v.scrap, totalScrap));
+      set(`r_${def.key}_over_pct`,  pctOrDash(v.over, totalOver));
+    }
+  }catch(err){
+    console.error('[renderReasonCards] failed', err);
+  }
+}
     for (const def of REASON_DEFS){
       const v = sums[def.key] || {scrap:0, over:0};
       set(`r_${def.key}_scrap_amt`, fmtMoney(v.scrap));
