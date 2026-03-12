@@ -2329,13 +2329,38 @@ function buildSelectors() {
   state.years = years;
   $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-  // months by year (only show months with data)
+  // months by year（除了 summary 日別資料，也補入 JFM 週檔 / 月檔涵蓋的月份）
   const monthsByYear = new Map();
   for (const r of state.summary) {
     const y = r.date.slice(0,4);
     const mm = r.date.slice(5,7);
     if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
     monthsByYear.get(y).add(mm);
+  }
+  if (state.jfmIndex) {
+    if (Array.isArray(state.jfmIndex.weeks)) {
+      for (const w of state.jfmIndex.weeks) {
+        if (!w || !w.startISO || !w.endISO) continue;
+        const cur = new Date(String(w.startISO).slice(0,4), Number(String(w.startISO).slice(5,7)) - 1, 1);
+        const endMonth = new Date(String(w.endISO).slice(0,4), Number(String(w.endISO).slice(5,7)) - 1, 1);
+        while (cur <= endMonth) {
+          const y = String(cur.getFullYear());
+          const mm = String(cur.getMonth() + 1).padStart(2, '0');
+          if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
+          monthsByYear.get(y).add(mm);
+          cur.setMonth(cur.getMonth() + 1);
+        }
+      }
+    }
+    if (Array.isArray(state.jfmIndex.months)) {
+      for (const m of state.jfmIndex.months) {
+        if (!m || !m.monthKey) continue;
+        const [y, mm] = String(m.monthKey).split('-');
+        if (!y || !mm) continue;
+        if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
+        monthsByYear.get(y).add(mm);
+      }
+    }
   }
   state.monthsByYear = {};
   for (const [y, set] of monthsByYear.entries()) {
@@ -2429,7 +2454,7 @@ function buildSelectors() {
   renderMonthOptions(latestYear);
   let defMonth = state.dateMax.slice(5,7);
   const availMonths = state.monthsByYear[latestYear] || [];
-  if (availMonths.length && !availMonths.includes(defMonth)) defMonth = availMonths[availMonths.length - 1] || defMonth;
+  if (availMonths.length) defMonth = availMonths[availMonths.length - 1] || defMonth;
   $('monthSel').value = defMonth || '';
   state.selection.month = defMonth || '';
 
