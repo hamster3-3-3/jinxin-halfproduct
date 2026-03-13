@@ -1226,7 +1226,6 @@ async function loadManifest() {
       "2026/01/【JFM指導】晉欣廠生產管理報表2026.01.XLSX",
       "2026/02/2026-0201-0302晉欣半成品報廢管理表.xlsx",
       "2026/02/【JFM指導】晉欣廠生產管理報表2026.02.XLSX",
-      "2026/03/2026-0301-0331晉欣半成品報廢管理表.xlsx",
       "2026/03/【JFM指導】晉欣廠生產管理報表2026.0303-0309.XLSX"
     ];
   }
@@ -2131,10 +2130,8 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  // Parse ALL 「（7）原因別分析(M/D-M/D)」 blocks from 生產管理報表 7-1(週)
-  // so week/month/year views can all aggregate correctly.
-  // Parse ALL 「（7）原因別分析(M/D-M/D)」 blocks from 生產管理報表 7-1(週)
-  // so week/month/year views can all aggregate correctly.
+  // 穩定版：仍以固定版面解析，但「原因別分析標題」改成掃描整張表，
+  // 不再限定一定要出現在 A 欄，避免 merged cell / 標題偏移時抓不到。
   const sheetName = findReasonSheetName(wb) || findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
   if (!sheetName) return [];
   const ws = wb.Sheets[sheetName];
@@ -2161,18 +2158,7 @@ function parseReasonFromWB(wb, fileName){
     return Number.isFinite(n) ? n : 0;
   }
 
-  const cols = [5,7,9,11]; // F,H,J,L
-  const labels = [
-    '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
-    '原物料規格', '研發設定', '其他原因', '步留不足'
-  ];
-
-  const out = [];
-  for(let startRow=0; startRow<rows.length; startRow++){
-    const raw = (rows[startRow] && rows[startRow][0]) || '';
-    const title = normTitle(raw);
-    if (!title.includes('原因別分析(')) continue;
-
+  function parseRangeFromTitle(title){
     const m = title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})\)/)
            || title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\)/);
     let startISO = null, endISO = null, rangeKey = null, monthKey = null, year = fileYear;
@@ -2196,7 +2182,32 @@ function parseReasonFromWB(wb, fileName){
       monthKey = endISO ? String(endISO).slice(0,7) : null;
       year = startISO ? String(startISO).slice(0,4) : fileYear;
     }
+    return { startISO, endISO, rangeKey, monthKey, year };
+  }
 
+  const cols = [5,7,9,11]; // F,H,J,L
+  const labels = [
+    '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
+    '原物料規格', '研發設定', '其他原因', '步留不足'
+  ];
+
+  const titleRows = [];
+  for(let r=0; r<rows.length; r++){
+    const row = rows[r] || [];
+    for(let c=0; c<row.length; c++){
+      const title = normTitle(row[c]);
+      if (title.includes('原因別分析(') || title.includes('原因別分析（') || title.includes('原因別分析(')) {
+        titleRows.push({ rowIndex: r, title });
+        break;
+      }
+    }
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const item of titleRows){
+    const startRow = item.rowIndex;
+    const info = parseRangeFromTitle(item.title);
     const scrap1 = startRow + 6, over1 = startRow + 7;
     const scrap2 = startRow + 11, over2 = startRow + 12;
 
@@ -2206,19 +2217,60 @@ function parseReasonFromWB(wb, fileName){
       const rS = block===0 ? scrap1 : scrap2;
       const rO = block===0 ? over1  : over2;
       const cA = cols[idx];
-      out.push({
-        start: startISO,
-        end: endISO,
-        rangeKey,
-        monthKey,
-        year: String(year||''),
+      const rec = {
+        start: info.startISO,
+        end: info.endISO,
+        rangeKey: info.rangeKey,
+        monthKey: info.monthKey,
+        year: String(info.year||''),
         reason: labels[i],
         scrapAmt: cellNum(rS, cA),
         overuseAmt: cellNum(rO, cA),
         source: safeStr(fileName)
-      });
+      };
+      const k = [rec.start, rec.end, rec.reason, rec.source].join('|');
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(rec);
+      }
     }
   }
+
+  // 若完全沒找到標題列，但檔名本身是週檔，仍嘗試用第一個「原因別分析」關鍵字所在列做一次解析
+  if (!out.length){
+    let fallbackRow = -1;
+    for(let r=0; r<rows.length && fallbackRow < 0; r++){
+      const row = rows[r] || [];
+      for(let c=0; c<row.length; c++){
+        const t = normTitle(row[c]);
+        if (t.includes('原因別分析')) { fallbackRow = r; break; }
+      }
+    }
+    if (fallbackRow >= 0){
+      const info = parseRangeFromTitle(normTitle(fileName));
+      const scrap1 = fallbackRow + 6, over1 = fallbackRow + 7;
+      const scrap2 = fallbackRow + 11, over2 = fallbackRow + 12;
+      for(let i=0;i<8;i++){
+        const block = (i<4) ? 0 : 1;
+        const idx = (i<4) ? i : i-4;
+        const rS = block===0 ? scrap1 : scrap2;
+        const rO = block===0 ? over1  : over2;
+        const cA = cols[idx];
+        out.push({
+          start: info.startISO,
+          end: info.endISO,
+          rangeKey: info.rangeKey,
+          monthKey: info.monthKey,
+          year: String(info.year||''),
+          reason: labels[i],
+          scrapAmt: cellNum(rS, cA),
+          overuseAmt: cellNum(rO, cA),
+          source: safeStr(fileName)
+        });
+      }
+    }
+  }
+
   return out;
 }
 
@@ -2325,7 +2377,17 @@ async function loadAllData() {
 }
 
 function buildSelectors() {
-  const years = Array.from(new Set(state.summary.map(r => r.date.slice(0,4)))).sort();
+  const yearSet = new Set(state.summary.map(r => r.date.slice(0,4)));
+  if (state.jfmIndex) {
+    for (const w of (state.jfmIndex.weeks || [])) {
+      if (w && w.startISO) yearSet.add(String(w.startISO).slice(0,4));
+      if (w && w.endISO) yearSet.add(String(w.endISO).slice(0,4));
+    }
+    for (const m of (state.jfmIndex.months || [])) {
+      if (m && m.monthKey) yearSet.add(String(m.monthKey).slice(0,4));
+    }
+  }
+  const years = Array.from(yearSet).sort();
   state.years = years;
   $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
