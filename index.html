@@ -1226,7 +1226,12 @@ async function loadManifest() {
       "2026/01/【JFM指導】晉欣廠生產管理報表2026.01.XLSX",
       "2026/02/2026-0201-0302晉欣半成品報廢管理表.xlsx",
       "2026/02/【JFM指導】晉欣廠生產管理報表2026.02.XLSX",
-      "2026/03/【JFM指導】晉欣廠生產管理報表2026.0303-0309.XLSX"
+      "2026/03/【JFM指導】晉欣廠生產管理報表2026.0303-0309.XLSX",
+      "2026/03/2026-0303-0309晉欣半成品報廢管理表.xlsx",
+      "2026/03/2026-0310-0316晉欣半成品報廢管理表.xlsx",
+      "2026/03/2026-0317-0323晉欣半成品報廢管理表.xlsx",
+      "2026/03/【JFM指導】晉欣廠生產管理報表2026.0310-0316.XLSX",
+      "2026/03/【JFM指導】晉欣廠生產管理報表2026.0317-0323.XLSX"
     ];
   }
   return [];
@@ -1254,6 +1259,26 @@ function weekKeyFromISO(startISO, endISO){
   const e = parseISO(endISO);
   if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return null;
   return `${toMMDD(s)}-${toMMDD(e)}`;
+}
+
+
+
+function parseWasteWeekFromName(filePath){
+  const n = baseName(filePath);
+  // e.g. 2026-0310-0316晉欣半成品報廢管理表.xlsx
+  const m = n.match(/(20\d{2})-(\d{2})(\d{2})-(\d{2})(\d{2})/i);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const sm = Number(m[2]), sd = Number(m[3]);
+  const em = Number(m[4]), ed = Number(m[5]);
+  if (!y || !sm || !sd || !em || !ed) return null;
+  let ey = y;
+  if (em < sm || (em === sm && ed < sd)) ey = y + 1;
+  return {
+    path: filePath,
+    start: toISO(new Date(y, sm - 1, sd)),
+    end: toISO(new Date(ey, em - 1, ed))
+  };
 }
 
 function buildJfmIndex(files){
@@ -2451,11 +2476,20 @@ function buildSelectors() {
       wkMap.set(key, { start: key, end: toISO(e) });
     }
   }
-  // 補入 manifest / JFM 中已有的週檔，避免週別下拉漏掉像 2026/03 的 03/03~03/09
+  // 補入 manifest / JFM 中已存在但尚未被 summary 掃到的週檔，
+  // 避免新增 03/10~03/16、03/17~03/23 這類檔案後，週別下拉沒有同步拓展。
   if (state.jfmIndex && Array.isArray(state.jfmIndex.weeks)) {
     for (const w of state.jfmIndex.weeks) {
       if (!w || !w.startISO || !w.endISO) continue;
       if (!wkMap.has(w.startISO)) wkMap.set(w.startISO, { start: w.startISO, end: w.endISO });
+    }
+  }
+  if (Array.isArray(state.manifestFiles)) {
+    for (const fp of state.manifestFiles) {
+      if (!isWasteFile(fp)) continue;
+      const w = parseWasteWeekFromName(fp);
+      if (!w || !w.start || !w.end) continue;
+      if (!wkMap.has(w.start)) wkMap.set(w.start, { start: w.start, end: w.end });
     }
   }
   state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>safeLocaleCompare(a.start,b.start));
