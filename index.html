@@ -748,6 +748,7 @@ function fallbackScanAmountRight(sheet, r, c){
                 <button class="seg-btn" type="button" data-item-single="scrapAmt">報廢金額</button>
                 <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
                 <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
+                <button class="seg-btn" type="button" id="itemOrderOverlayBtn">訂單需求(副Y軸)</button>
               </div>
             </div>
 
@@ -823,6 +824,7 @@ const state = {
   },
   kpiSelected: ['sales'],
   itemMetricSelected: 'diffAmt',
+  itemShowOrderDemand: false,
   rightMode: 'scrapTop10',
   rightMetric: 'amt',
   groupRows: [],
@@ -3389,10 +3391,14 @@ function renderItemChart(daily) {
   destroyChart('item');
 
   const metric = state.itemMetricSelected || 'diffAmt';
+  const showOrderDemand = !!state.itemShowOrderDemand;
+
   // sync UI active state
   document.querySelectorAll('button[data-item-single]').forEach(b => {
     b.classList.toggle('active', b.dataset.itemSingle === metric);
   });
+  const orderBtn = $('itemOrderOverlayBtn');
+  if (orderBtn) orderBtn.classList.toggle('active', showOrderDemand);
 
   const meta = {
     prodRate: {
@@ -3434,10 +3440,19 @@ function renderItemChart(daily) {
       get: (r) => r.refill,
       fmt: (v) => fmtInt(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    orderQty: {
+      label: '訂單需求',
+      kind: 'qty',
+      unitTitle: '數量',
+      get: (r) => r.order,
+      fmt: (v) => fmtInt(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
     }
   };
 
   const m = meta[metric] || meta.diffAmt;
+  const orderMeta = meta.orderQty;
 
   // === X 軸顯示規則（依目前時間範圍模式）===
   // 年別：以「月」為單位（1月、2月…）
@@ -3455,119 +3470,141 @@ function renderItemChart(daily) {
   const fmtMMDD = (d) => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
 
   const weekStartTue = (d) => {
-    // 週二～週一：找出「該日所屬週」的週二作為 weekStart
-    const wd = d.getDay(); // 0=Sun ... 2=Tue
+    const wd = d.getDay();
     const diff = (wd - 2 + 7) % 7;
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
   };
 
-// 月別（跨月週）計算邊界：只要週區間任一天落在該月，就納入該週整段
-let monthStart = null;
-let monthEnd = null;
-if (mode === 'month') {
-  const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
-  const mSel = Number(state.selection.month || $('monthSel').value || (parsed[0] ? (parsed[0]._d.getMonth()+1) : (new Date().getMonth()+1)));
-  monthStart = new Date(ySel, mSel - 1, 1);
-  monthEnd = new Date(ySel, mSel, 0); // 當月最後一天
-}
+  let monthStart = null;
+  let monthEnd = null;
+  if (mode === 'month') {
+    const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
+    const mSel = Number(state.selection.month || $('monthSel').value || (parsed[0] ? (parsed[0]._d.getMonth()+1) : (new Date().getMonth()+1)));
+    monthStart = new Date(ySel, mSel - 1, 1);
+    monthEnd = new Date(ySel, mSel, 0);
+  }
 
-  const buckets = new Map(); // key -> { d:Date, label:string, sum:number, cnt:number }
-  const isRate = (m.kind === 'rate');
+  const buckets = new Map(); // key -> { d, label, metrics:{ metricKey:{sum,cnt} } }
 
-  const addToBucket = (key, d, label, v) => {
-    if (!buckets.has(key)) buckets.set(key, { d, label, sum: 0, cnt: 0 });
+  const addToBucket = (key, d, label, metricKey, v) => {
+    if (!buckets.has(key)) buckets.set(key, { d, label, metrics: {} });
     const b = buckets.get(key);
+    if (!b.metrics[metricKey]) b.metrics[metricKey] = { sum: 0, cnt: 0 };
     if (v == null || !Number.isFinite(Number(v))) return;
-    b.sum += Number(v);
-    b.cnt += 1;
+    b.metrics[metricKey].sum += Number(v);
+    b.metrics[metricKey].cnt += 1;
+  };
+
+  const metricKeys = [metric];
+  if (showOrderDemand) metricKeys.push('orderQty');
+
+  const addRowMetrics = (key, d, label, r) => {
+    for (const mk of metricKeys) {
+      const mm = (mk === 'orderQty') ? orderMeta : m;
+      addToBucket(key, d, label, mk, mm.get(r));
+    }
   };
 
   if (mode === 'year') {
     const ySel = Number(state.selection.year || $('yearSel').value || (parsed[0] ? parsed[0]._d.getFullYear() : new Date().getFullYear()));
-
-    // 年別：X 軸固定顯示整年 1~12 月（即使沒有資料也保留月份）
     for (let mi = 0; mi < 12; mi++) {
       const key = `${ySel}-${String(mi+1).padStart(2,'0')}`;
       const d0 = new Date(ySel, mi, 1);
       const label = `${mi+1}月`;
-      if (!buckets.has(key)) buckets.set(key, { d: d0, label, sum: 0, cnt: 0 });
+      if (!buckets.has(key)) buckets.set(key, { d: d0, label, metrics: {} });
     }
-
     for (const r of parsed) {
       const d = r._d;
       if (d.getFullYear() !== ySel) continue;
-      const monthIdx = d.getMonth(); // 0-11
+      const monthIdx = d.getMonth();
       const key = `${ySel}-${String(monthIdx+1).padStart(2,'0')}`;
-      const v = m.get(r);
-      // 年別：金額/數量用「加總」，比率用「平均」
-      addToBucket(key, new Date(ySel, monthIdx, 1), `${monthIdx+1}月`, v);
+      addRowMetrics(key, new Date(ySel, monthIdx, 1), `${monthIdx+1}月`, r);
     }
   } else if (mode === 'month') {
     for (const r of parsed) {
       const ws = weekStartTue(r._d);
       const we = new Date(ws.getTime()); we.setDate(we.getDate()+6);
-      // 只顯示與該月有交集的週（跨月週也要納入）
       if (we < monthStart || ws > monthEnd) continue;
       const key = toISO(ws);
       const label = `${fmtMMDD(ws)}~${fmtMMDD(we)}`;
-      const v = m.get(r);
-      // 月別：金額/數量用「加總」，比率用「平均」
-      addToBucket(key, ws, label, v);
+      addRowMetrics(key, ws, label, r);
     }
   } else if (mode === 'week') {
     for (const r of parsed) {
       const d = r._d;
       const key = toISO(d);
       const label = fmtMD(d);
-      const v = m.get(r);
-      addToBucket(key, d, label, v);
+      addRowMetrics(key, d, label, r);
     }
   } else {
-    // day / range：保持原本的 MM-DD 顯示
     for (const r of parsed) {
       const d = r._d;
       const key = toISO(d);
       const label = shortLabel(toISO(d));
-      const v = m.get(r);
-      addToBucket(key, d, label, v);
+      addRowMetrics(key, d, label, r);
     }
   }
 
   const points = Array.from(buckets.values()).sort((a,b) => a.d - b.d);
   const labels = points.map(p => p.label);
-  const values = points.map(p => {
-    if (!p.cnt) return null;
-    // 比率 => 平均；金額/數量 => 加總（依你要的「以單位彙總」呈現）
-    return isRate ? (p.sum / p.cnt) : p.sum;
+  const calcValues = (metricKey, metaObj) => points.map(p => {
+    const mm = p.metrics[metricKey];
+    if (!mm || !mm.cnt) return null;
+    return metaObj.kind === 'rate' ? (mm.sum / mm.cnt) : mm.sum;
   });
 
+  const values = calcValues(metric, m);
+  const orderValues = showOrderDemand ? calcValues('orderQty', orderMeta) : [];
+
   const bounds = computeBounds(values, m.kind);
+  const orderBounds = showOrderDemand ? computeBounds(orderValues, orderMeta.kind) : null;
+
+  const datasets = [{
+    type: 'line',
+    label: m.label,
+    data: values,
+    borderWidth: 3,
+    tension: 0.25,
+    spanGaps: true,
+    pointRadius: 3,
+    pointHoverRadius: 4,
+    yAxisID: 'y'
+  }];
+
+  if (showOrderDemand) {
+    datasets.push({
+      type: 'bar',
+      label: orderMeta.label,
+      data: orderValues,
+      yAxisID: 'y1',
+      borderWidth: 1,
+      barPercentage: 0.62,
+      categoryPercentage: 0.7,
+      order: 2
+    });
+  }
 
   const ctx = $('itemChart').getContext('2d');
 
   state.charts.item = new Chart(ctx, {
-    type: 'line',
     data: {
       labels,
-      datasets: [{
-        label: m.label,
-        data: values,
-        borderWidth: 3,
-        tension: 0.25,
-        spanGaps: true,
-        pointRadius: 3,
-        pointHoverRadius: 4
-      }]
+      datasets
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: { display: showOrderDemand },
         tooltip: {
           callbacks: {
-            label: (c) => `${m.label}：${m.fmt(c.parsed.y)}`
+            label: (c) => {
+              const dsLabel = c.dataset && c.dataset.label ? c.dataset.label : '';
+              const y = c.parsed && c.parsed.y;
+              if (dsLabel === orderMeta.label) return `${orderMeta.label}：${orderMeta.fmt(y)}`;
+              return `${m.label}：${m.fmt(y)}`;
+            }
           }
         }
       },
@@ -3577,11 +3614,24 @@ if (mode === 'month') {
           ticks: { maxRotation: 0, autoSkip: true }
         },
         y: {
+          type: 'linear',
+          position: 'left',
           beginAtZero: false,
           min: bounds ? bounds.min : undefined,
           max: bounds ? bounds.max : undefined,
           title: { display: true, text: m.unitTitle },
           ticks: { callback: (v) => m.tick(v) }
+        },
+        y1: {
+          type: 'linear',
+          position: 'right',
+          display: showOrderDemand,
+          beginAtZero: true,
+          min: orderBounds ? orderBounds.min : undefined,
+          max: orderBounds ? orderBounds.max : undefined,
+          grid: { drawOnChartArea: false },
+          title: { display: showOrderDemand, text: orderMeta.unitTitle },
+          ticks: { callback: (v) => orderMeta.tick(v) }
         }
       }
     }
@@ -3747,6 +3797,15 @@ function wireUI() {
       renderSelectedItem();
     });
   });
+  const itemOrderOverlayBtn = $('itemOrderOverlayBtn');
+  if (itemOrderOverlayBtn) {
+    itemOrderOverlayBtn.addEventListener('click', () => {
+      state.itemShowOrderDemand = !state.itemShowOrderDemand;
+      itemOrderOverlayBtn.classList.toggle('active', state.itemShowOrderDemand);
+      if (!state.selectedKey) return;
+      renderSelectedItem();
+    });
+  }
 
   // group filters
   $('sortSel').addEventListener('change', () => renderAll());
