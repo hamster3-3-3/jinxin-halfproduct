@@ -2303,11 +2303,16 @@ function parseReasonFromWB(wb, fileName){
 
 
 async function loadAllData() {
-  $('dataStatus').innerHTML = '<span class="loader"></span> 載入中...';
+  $('dataStatus').innerHTML = '<span class="loader"></span> 準備載入資料...';
   $('dataStatus').classList.remove('chip');
   $('dataStatus').classList.add('chip');
 
+  const updateLoadStatus = (msg) => {
+    $('dataStatus').innerHTML = `<span class="loader"></span> ${msg}`;
+  };
+
   // Ensure libs
+  updateLoadStatus('載入解析套件...');
   await ensureLibGlobal('XLSX', [
     './xlsx.full.min.js',
     'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
@@ -2318,9 +2323,17 @@ async function loadAllData() {
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
-  // Optional: load 上市日期表（鮮食開發確認表.xlsx）
-  const launchPromise = tryLoadLaunchMap();
+  // Optional: 上市日期表改為背景載入，不阻塞主資料
+  tryLoadLaunchMap()
+    .then(() => {
+      if (state.loaded) {
+        try { renderGroupTable(); } catch(_) {}
+        try { renderDetailPanel(); } catch(_) {}
+      }
+    })
+    .catch((e) => console.warn('上市日期表背景載入失敗：', e));
 
+  updateLoadStatus('讀取 manifest...');
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
   state.manifestFiles = files.slice();
@@ -2329,17 +2342,38 @@ async function loadAllData() {
   const jfmFiles = files.filter(isJfmFile);
   state.jfmIndex = buildJfmIndex(jfmFiles);
 
+  const totalCount = wasteFiles.length + jfmFiles.length;
+  let finishedCount = 0;
   const loadErrors = [];
   let sum = [];
   let det = [];
   let reasons = [];
   let top20 = [];
 
-  // 只解析「報廢管理表」的日別資料，避免 JFM 檔造成日別去重覆蓋不一致
-  for (const f of wasteFiles) {
+  const bumpProgress = (label, file) => {
+    finishedCount += 1;
+    updateLoadStatus(`${label} ${finishedCount}/${totalCount}：${baseName(file)}`);
+  };
+
+  async function runBatched(files, concurrency, worker){
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    let index = 0;
+    async function runner(){
+      while (index < list.length){
+        const current = list[index++];
+        await worker(current);
+      }
+    }
+    const jobs = Array.from({length: Math.max(1, Math.min(concurrency, list.length))}, () => runner());
+    await Promise.all(jobs);
+  }
+
+  // 報廢管理表：並行載入，避免大量串行等待
+  await runBatched(wasteFiles, 3, async (f) => {
     try{
       const url = './data/' + encodePath(f);
-      const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
+      const r = await fetchWithTimeout(url, {cache:'no-store'}, 15000);
       if (!r.ok) throw new Error('讀取失敗：' + f);
       const ab = await r.arrayBuffer();
       const wb = XLSX.read(ab, {type:'array', cellDates:true});
@@ -2348,14 +2382,16 @@ async function loadAllData() {
     }catch(e){
       console.warn(e);
       loadErrors.push(f);
+    }finally{
+      bumpProgress('報廢管理表', f);
     }
-  }
+  });
 
-  // 解析所有 JFM 檔（原因卡片 + 前20大 + 重複次數判定需要歷史）
-  for (const f of jfmFiles) {
+  // JFM：補上 timeout，並行載入，避免單檔無限卡住
+  await runBatched(jfmFiles, 3, async (f) => {
     try{
       const url = './data/' + encodePath(f);
-      const r = await fetch(url, {cache:'no-store'});
+      const r = await fetchWithTimeout(url, {cache:'no-store'}, 15000);
       if (!r.ok) throw new Error('讀取失敗：' + f);
       const ab = await r.arrayBuffer();
       const wb = XLSX.read(ab, {type:'array', cellDates:true});
@@ -2364,8 +2400,10 @@ async function loadAllData() {
     }catch(e){
       console.warn(e);
       loadErrors.push(f);
+    }finally{
+      bumpProgress('JFM', f);
     }
-  }
+  });
 
   // dedupe summary by date (keep last)
   const m = new Map();
@@ -2389,12 +2427,8 @@ async function loadAllData() {
   state.dateMin = state.summary[0].date;
   state.dateMax = state.summary[state.summary.length-1].date;
 
-  // 等待上市日期表（不影響主資料載入）
-  try { await launchPromise; } catch(_) {}
-
   // status
-  const okCount = wasteFiles.length + jfmFiles.length - loadErrors.length;
-  const totalCount = wasteFiles.length + jfmFiles.length;
+  const okCount = totalCount - loadErrors.length;
   $('dataStatus').textContent = `已載入 ${okCount}/${totalCount} 份檔案（報廢管理表:${wasteFiles.length}、JFM:${jfmFiles.length}）`;
   state.loadErrors = loadErrors.slice();
   window.__loadErrors = loadErrors.slice();
