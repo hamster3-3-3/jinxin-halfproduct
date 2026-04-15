@@ -255,22 +255,6 @@ function monthKeyFromISO(iso){
       --danger:#dc2626;
       --ok:#16a34a;
     }
-function parseNumber(v){
-  if (v == null) return NaN;
-  if (typeof v === "number") return v;
-  const s = String(v).replace(/,/g,"").trim();
-  if (!s) return NaN;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
-}
-function fallbackScanAmountRight(sheet, r, c){
-  for (let dc=1; dc<=8; dc++){
-    const n = parseNumber(getCellValue(sheet, r, c+dc));
-    if (Number.isFinite(n) && n !== 0) return n;
-  }
-  return 0;
-}
-
 
     body {
       font-family: 'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
