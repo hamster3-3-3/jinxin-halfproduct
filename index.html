@@ -255,6 +255,22 @@ function monthKeyFromISO(iso){
       --danger:#dc2626;
       --ok:#16a34a;
     }
+function parseNumber(v){
+  if (v == null) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/,/g,"").trim();
+  if (!s) return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function fallbackScanAmountRight(sheet, r, c){
+  for (let dc=1; dc<=8; dc++){
+    const n = parseNumber(getCellValue(sheet, r, c+dc));
+    if (Number.isFinite(n) && n !== 0) return n;
+  }
+  return 0;
+}
+
 
     body {
       font-family: 'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
@@ -822,7 +838,12 @@ const state = {
   },
   _groupRangeKey: null,
   reasonWeeks: [],
-  top20Entries: []
+  top20Entries: [],
+  loadedMonthKeys: new Set(),
+  monthLoadPromises: new Map(),
+  manifestIntervals: [],
+  loadErrors: [],
+  launchPromise: null
 
 };
 const $ = (id) => document.getElementById(id);
@@ -2286,17 +2307,230 @@ function parseReasonFromWB(wb, fileName){
 
 
 
+
+function monthKeyFromDateObj(d){
+  if (!(d instanceof Date) || isNaN(d)) return null;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function monthKeysBetween(startISO, endISO){
+  const s = parseISO(startISO);
+  const e = parseISO(endISO);
+  if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return [];
+  const out = [];
+  const cur = new Date(s.getFullYear(), s.getMonth(), 1);
+  const end = new Date(e.getFullYear(), e.getMonth(), 1);
+  while (cur <= end){
+    out.push(monthKeyFromDateObj(cur));
+    cur.setMonth(cur.getMonth()+1);
+  }
+  return out;
+}
+
+function getFileMonthCoverage(fp){
+  const path = safeStr(fp);
+  const folder = path.match(/^(20\d{2})\/(0\d|1[0-2])\//);
+  let fallback = folder ? `${folder[1]}-${folder[2]}` : null;
+
+  if (isWasteFile(path)){
+    const w = parseWasteWeekFromName(path);
+    if (w && w.start && w.end) {
+      const months = monthKeysBetween(w.start, w.end);
+      if (months.length) return months;
+    }
+  }
+
+  const n = baseName(path);
+  let m = n.match(/生產管理報表(20\d{2})\.(\d{4})-(\d{4})\.xlsx/i);
+  if (m){
+    const y = Number(m[1]);
+    const a = m[2], b = m[3];
+    const sm = Number(a.slice(0,2)), sd = Number(a.slice(2,4));
+    const em = Number(b.slice(0,2)), ed = Number(b.slice(2,4));
+    const s = new Date(y, sm-1, sd);
+    let ey = y;
+    if (em < sm || (em===sm && ed < sd)) ey = y + 1;
+    const e = new Date(ey, em-1, ed);
+    const months = monthKeysBetween(toISO(s), toISO(e));
+    if (months.length) return months;
+  }
+
+  m = n.match(/生產管理報表(20\d{2})\.(\d{2})\.xlsx/i);
+  if (m) return [`${m[1]}-${m[2]}`];
+
+  return fallback ? [fallback] : [];
+}
+
+function buildManifestIntervals(files){
+  const intervals = [];
+  for (const fp of (files||[])){
+    const path = safeStr(fp);
+    if (!path) continue;
+    let start = null, end = null;
+    if (isWasteFile(path)){
+      const w = parseWasteWeekFromName(path);
+      if (w && w.start && w.end){ start = w.start; end = w.end; }
+    }
+    if (!start || !end){
+      const n = baseName(path);
+      let m = n.match(/生產管理報表(20\d{2})\.(\d{4})-(\d{4})\.xlsx/i);
+      if (m){
+        const y = Number(m[1]);
+        const a = m[2], b = m[3];
+        const sm = Number(a.slice(0,2)), sd = Number(a.slice(2,4));
+        const em = Number(b.slice(0,2)), ed = Number(b.slice(2,4));
+        const s = new Date(y, sm-1, sd);
+        let ey = y;
+        if (em < sm || (em===sm && ed < sd)) ey = y + 1;
+        const e = new Date(ey, em-1, ed);
+        start = toISO(s); end = toISO(e);
+      } else {
+        m = n.match(/生產管理報表(20\d{2})\.(\d{2})\.xlsx/i);
+        if (m){
+          const y = Number(m[1]), mm = Number(m[2]);
+          start = `${y}-${String(mm).padStart(2,'0')}-01`;
+          end = toISO(new Date(y, mm, 0));
+        }
+      }
+    }
+    if ((!start || !end) && /^(20\d{2})\/(0\d|1[0-2])\//.test(path)){
+      const m = path.match(/^(20\d{2})\/(0\d|1[0-2])\//);
+      const y = Number(m[1]), mm = Number(m[2]);
+      start = `${y}-${String(mm).padStart(2,'0')}-01`;
+      end = toISO(new Date(y, mm, 0));
+    }
+    if (start && end) intervals.push({path, start, end, months: getFileMonthCoverage(path)});
+  }
+  return intervals;
+}
+
+function filesForMonthKeys(monthKeys){
+  const set = new Set((monthKeys||[]).filter(Boolean));
+  if (!set.size) return [];
+  return (state.manifestFiles||[]).filter(fp => {
+    const months = getFileMonthCoverage(fp);
+    return months.some(m => set.has(m));
+  });
+}
+
+function computeNeededMonthKeysFromUI(){
+  const mode = state.mode;
+  const y = $('yearSel') ? $('yearSel').value : state.selection.year;
+  const m = $('monthSel') ? $('monthSel').value : state.selection.month;
+  if (mode === 'year') {
+    return (state.monthsByYear && state.monthsByYear[y]) ? state.monthsByYear[y].map(mm => `${y}-${mm}`) : [];
+  }
+  if (mode === 'month') {
+    return (y && m) ? [`${y}-${m}`] : [];
+  }
+  if (mode === 'week') {
+    const ws = $('weekSel') ? $('weekSel').value : state.selection.weekStart;
+    const w = (state.weeks || []).find(x => x.start === ws);
+    return w ? monthKeysBetween(w.start, w.end) : ((y && m) ? [`${y}-${m}`] : []);
+  }
+  if (mode === 'day') {
+    const d = $('daySel') ? $('daySel').value : state.selection.day;
+    if (!d) return [];
+    const dt = parseISO(d);
+    const mk = monthKeyFromDateObj(dt);
+    return mk ? [mk] : [];
+  }
+  if (mode === 'range') {
+    const s = $('rangeStart') ? $('rangeStart').value : state.selection.start;
+    const e = $('rangeEnd') ? $('rangeEnd').value : state.selection.end;
+    return (s && e) ? monthKeysBetween(s, e) : [];
+  }
+  return [];
+}
+
+function dedupeLoadedData(){
+  const sm = new Map();
+  for (const r of (state.summary||[])) sm.set(r.date, r);
+  state.summary = Array.from(sm.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+
+  state.details = (state.details||[]).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+
+  const rm = new Map();
+  for (const r of (state.reasonWeeks||[])) {
+    if (!r) continue;
+    const k = [r.start, r.end, r.reason, r.source].join('|');
+    rm.set(k, r);
+  }
+  state.reasonWeeks = Array.from(rm.values());
+  state.top20Entries = state.top20Entries || [];
+}
+
+async function ensureDataForMonthKeys(monthKeys){
+  const need = Array.from(new Set((monthKeys||[]).filter(Boolean))).filter(mk => !state.loadedMonthKeys.has(mk));
+  if (!need.length) return;
+
+  const files = filesForMonthKeys(need);
+  if (!files.length) {
+    need.forEach(mk => state.loadedMonthKeys.add(mk));
+    return;
+  }
+
+  $('dataStatus').innerHTML = `<span class="loader"></span> 載入資料中（${need.join(', ')}）...`;
+  $('dataStatus').classList.add('chip');
+
+  const loadErrors = [];
+  let sum = [];
+  let det = [];
+  let reasons = [];
+  let top20 = [];
+
+  for (const f of files) {
+    try {
+      const url = './data/' + encodePath(f);
+      if (isWasteFile(f)) {
+        const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
+        if (!r.ok) throw new Error('讀取失敗：' + f);
+        const ab = await r.arrayBuffer();
+        const wb = XLSX.read(ab, {type:'array', cellDates:true});
+        sum = sum.concat(parseSummaryFromWB(wb, f));
+        det = det.concat(parseDetailsFromWB(wb, f));
+      } else if (isJfmFile(f)) {
+        const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
+        if (!r.ok) throw new Error('讀取失敗：' + f);
+        const ab = await r.arrayBuffer();
+        const wb = XLSX.read(ab, {type:'array', cellDates:true});
+        reasons = reasons.concat(parseReasonFromWB(wb, f));
+        top20 = top20.concat(parseTop20FromWB(wb, f));
+      }
+    } catch (e) {
+      console.warn(e);
+      loadErrors.push(f);
+    }
+  }
+
+  state.summary = (state.summary || []).concat(sum);
+  state.details = (state.details || []).concat(det);
+  state.reasonWeeks = (state.reasonWeeks || []).concat(reasons);
+  state.top20Entries = (state.top20Entries || []).concat(top20);
+  dedupeLoadedData();
+
+  if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
+  need.forEach(mk => state.loadedMonthKeys.add(mk));
+  state.loadErrors = Array.from(new Set((state.loadErrors || []).concat(loadErrors)));
+
+  if (loadErrors.length) {
+    $('dataStatus').textContent = `資料已載入（部分失敗 ${loadErrors.length}）`;
+  } else {
+    $('dataStatus').textContent = `資料已載入（${state.loadedMonthKeys.size} 個月份）`;
+  }
+}
+
+async function ensureDataForCurrentSelection(){
+  const keys = computeNeededMonthKeysFromUI();
+  if (!keys.length) return;
+  await ensureDataForMonthKeys(keys);
+}
+
 async function loadAllData() {
-  $('dataStatus').innerHTML = '<span class="loader"></span> 準備載入資料...';
+  $('dataStatus').innerHTML = '<span class="loader"></span> 初始化中...';
   $('dataStatus').classList.remove('chip');
   $('dataStatus').classList.add('chip');
 
-  const updateLoadStatus = (msg) => {
-    $('dataStatus').innerHTML = `<span class="loader"></span> ${msg}`;
-  };
-
-  // Ensure libs
-  updateLoadStatus('載入解析套件...');
   await ensureLibGlobal('XLSX', [
     './xlsx.full.min.js',
     'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
@@ -2307,17 +2541,8 @@ async function loadAllData() {
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
-  // Optional: 上市日期表改為背景載入，不阻塞主資料
-  tryLoadLaunchMap()
-    .then(() => {
-      if (state.loaded) {
-        try { renderGroupTable(); } catch(_) {}
-        try { renderDetailPanel(); } catch(_) {}
-      }
-    })
-    .catch((e) => console.warn('上市日期表背景載入失敗：', e));
+  state.launchPromise = tryLoadLaunchMap();
 
-  updateLoadStatus('讀取 manifest...');
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
   state.manifestFiles = files.slice();
@@ -2325,104 +2550,33 @@ async function loadAllData() {
   const wasteFiles = files.filter(isWasteFile);
   const jfmFiles = files.filter(isJfmFile);
   state.jfmIndex = buildJfmIndex(jfmFiles);
+  state.manifestIntervals = buildManifestIntervals(files);
+  state.loadErrors = [];
+  state.summary = [];
+  state.details = [];
+  state.reasonWeeks = [];
+  state.top20Entries = [];
+  state.loadedMonthKeys = new Set();
+  state.monthLoadPromises = new Map();
 
-  const totalCount = wasteFiles.length + jfmFiles.length;
-  let finishedCount = 0;
-  const loadErrors = [];
-  let sum = [];
-  let det = [];
-  let reasons = [];
-  let top20 = [];
-
-  const bumpProgress = (label, file) => {
-    finishedCount += 1;
-    updateLoadStatus(`${label} ${finishedCount}/${totalCount}：${baseName(file)}`);
-  };
-
-  async function runBatched(files, concurrency, worker){
-    const list = Array.from(files || []);
-    if (!list.length) return;
-    let index = 0;
-    async function runner(){
-      while (index < list.length){
-        const current = list[index++];
-        await worker(current);
-      }
-    }
-    const jobs = Array.from({length: Math.max(1, Math.min(concurrency, list.length))}, () => runner());
-    await Promise.all(jobs);
+  const intervals = state.manifestIntervals || [];
+  if (intervals.length) {
+    const starts = intervals.map(x => x.start).filter(Boolean).sort();
+    const ends = intervals.map(x => x.end).filter(Boolean).sort();
+    state.dateMin = starts[0] || null;
+    state.dateMax = ends[ends.length - 1] || null;
+  }
+  if (!state.dateMin || !state.dateMax) {
+    // fallback from file folder months
+    const monthKeys = Array.from(new Set(files.map(getFileMonthCoverage).flat().filter(Boolean))).sort();
+    if (!monthKeys.length) throw new Error('manifest 無可用月份');
+    state.dateMin = `${monthKeys[0]}-01`;
+    const last = monthKeys[monthKeys.length-1];
+    const [yy, mm] = last.split('-').map(Number);
+    state.dateMax = toISO(new Date(yy, mm, 0));
   }
 
-  // 報廢管理表：並行載入，避免大量串行等待
-  await runBatched(wasteFiles, 3, async (f) => {
-    try{
-      const url = './data/' + encodePath(f);
-      const r = await fetchWithTimeout(url, {cache:'no-store'}, 15000);
-      if (!r.ok) throw new Error('讀取失敗：' + f);
-      const ab = await r.arrayBuffer();
-      const wb = XLSX.read(ab, {type:'array', cellDates:true});
-      sum = sum.concat(parseSummaryFromWB(wb, f));
-      det = det.concat(parseDetailsFromWB(wb, f));
-    }catch(e){
-      console.warn(e);
-      loadErrors.push(f);
-    }finally{
-      bumpProgress('報廢管理表', f);
-    }
-  });
-
-  // JFM：補上 timeout，並行載入，避免單檔無限卡住
-  await runBatched(jfmFiles, 3, async (f) => {
-    try{
-      const url = './data/' + encodePath(f);
-      const r = await fetchWithTimeout(url, {cache:'no-store'}, 15000);
-      if (!r.ok) throw new Error('讀取失敗：' + f);
-      const ab = await r.arrayBuffer();
-      const wb = XLSX.read(ab, {type:'array', cellDates:true});
-      reasons = reasons.concat(parseReasonFromWB(wb, f));
-      top20 = top20.concat(parseTop20FromWB(wb, f));
-    }catch(e){
-      console.warn(e);
-      loadErrors.push(f);
-    }finally{
-      bumpProgress('JFM', f);
-    }
-  });
-
-  // dedupe summary by date (keep last)
-  const m = new Map();
-  for (const r of sum) m.set(r.date, r);
-  state.summary = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
-  state.details = det.sort((a,b)=>safeLocaleCompare(a.date,b.date));
-
-  // 原因別分析：同一檔內同一週同一原因可能重複，做 (start,end,reason,source) 去重
-  const rm = new Map();
-  for (const r of reasons) {
-    if (!r) continue;
-    const k = [r.start, r.end, r.reason, r.source].join('|');
-    rm.set(k, r);
-  }
-  state.reasonWeeks = Array.from(rm.values());
-
-  // Top20 原因別分析（保留全部，重複次數判定要用）
-  state.top20Entries = top20;
-
-  if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
-  state.dateMin = state.summary[0].date;
-  state.dateMax = state.summary[state.summary.length-1].date;
-
-  // status
-  const okCount = totalCount - loadErrors.length;
-  $('dataStatus').textContent = `已載入 ${okCount}/${totalCount} 份檔案（報廢管理表:${wasteFiles.length}、JFM:${jfmFiles.length}）`;
-  state.loadErrors = loadErrors.slice();
-  window.__loadErrors = loadErrors.slice();
-  if (loadErrors.length){
-    console.warn('讀取失敗清單：', loadErrors);
-    const shown = loadErrors.slice(0, 3).map(baseName).join('、');
-    const more = loadErrors.length > 3 ? ` 等 ${loadErrors.length} 份` : '';
-    $('dataStatus').textContent += `｜略過 ${loadErrors.length} 份異常檔`;
-    toast(`注意：已略過 ${loadErrors.length} 份異常檔：${shown}${more}`);
-  }
+  $('dataStatus').textContent = '資料索引已建立，準備依月份載入...';
 }
 
 function buildSelectors() {
@@ -3778,7 +3932,7 @@ function wireUI() {
   });
 
   // apply
-  $('applyBtn').addEventListener('click', () => {
+  $('applyBtn').addEventListener('click', async () => {
     state.selection.year = $('yearSel').value;
     state.selection.month = $('monthSel').value;
     state.selection.weekStart = $('weekSel').value;
@@ -3786,17 +3940,17 @@ function wireUI() {
     state.selection.day = $('daySel').value;
     state.selection.start = $('rangeStart').value;
     state.selection.end = $('rangeEnd').value;
-    renderAll();
+    await applySelectionFromUI();
     renderSelectedItem();
   });
 
-  $('todayBtn').addEventListener('click', () => {
+  $('todayBtn').addEventListener('click', async () => {
     // set to latest date (day mode)
     state.mode = 'day';
     document.querySelectorAll('button.seg-btn[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode==='day'));
     syncModeUI();
     $('daySel').value = state.dateMax;
-    $('applyBtn').click();
+    await applySelectionFromUI();
   });
 
   $('reloadBtn').addEventListener('click', async () => {
@@ -4034,7 +4188,7 @@ const tbody = $('top20ExpBody');
 }
 
 
-function applySelectionFromUI(){
+async function applySelectionFromUI(){
   // Sync state.selection from current UI controls and refresh views.
   try{
     const year = $('yearSel') ? $('yearSel').value : state.selection.year;
@@ -4070,6 +4224,8 @@ function applySelectionFromUI(){
     } else if (state.mode === 'year'){
       // year mode uses year only
     }
+    await ensureDataForCurrentSelection();
+
     // Recompute active JFM source(s) for reason cards / Top20 based on filename rules
     state.activeJfmSources = computeActiveJfmSources();
 
@@ -4106,10 +4262,11 @@ async function init(force=false) {
     initStickyControls();
     syncModeUI();
     bindAutoApply();
-    // auto-apply current selector values
-    applySelectionFromUI();
-    // renderAll() is invoked by applySelectionFromUI()
-state.loaded = true;
+    // auto-apply current selector values（依目前選取月份延遲載入）
+    await applySelectionFromUI();
+    // 上市日期背景補載，不阻塞主畫面
+    Promise.resolve(state.launchPromise).then(()=>{ try{ renderAll(); if (state.selectedKey) renderSelectedItem(); }catch(e){} }).catch(()=>{});
+    state.loaded = true;
   } catch (e) {
     console.error(e);
     const failed = Array.isArray(state.loadErrors) && state.loadErrors.length
