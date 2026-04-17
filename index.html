@@ -255,23 +255,6 @@ function monthKeyFromISO(iso){
       --danger:#dc2626;
       --ok:#16a34a;
     }
-function parseNumber(v){
-  if (v == null) return NaN;
-  if (typeof v === "number") return v;
-  const s = String(v).replace(/,/g,"").trim();
-  if (!s) return NaN;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
-}
-function fallbackScanAmountRight(sheet, r, c){
-  for (let dc=1; dc<=8; dc++){
-    const n = parseNumber(getCellValue(sheet, r, c+dc));
-    if (Number.isFinite(n) && n !== 0) return n;
-  }
-  return 0;
-}
-
-
     body {
       font-family: 'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
       background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
@@ -1467,6 +1450,22 @@ function parseFileStartFromName(fileName) {
   if (!Number.isFinite(y) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null;
   return new Date(y, mm - 1, dd);
 }
+
+function parseFileSpanFromName(fileName) {
+  if (!fileName) return null;
+  const m = String(fileName).match(/(\d{4})-(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const sm = Number(m[2]), sd = Number(m[3]);
+  const em = Number(m[4]), ed = Number(m[5]);
+  if (![y,sm,sd,em,ed].every(Number.isFinite)) return null;
+  let ey = y;
+  if (em < sm || (em === sm && ed < sd)) ey = y + 1;
+  return {
+    start: new Date(y, sm - 1, sd),
+    end: new Date(ey, em - 1, ed)
+  };
+}
 function ymToIndex(ym) {
   const m = String(ym).match(/^(\d{4})-(\d{2})$/);
   if (!m) return null;
@@ -1555,8 +1554,10 @@ function parseSummaryFromWB(wb, fileName) {
   // 有些檔案的「日別報廢率總表」日期欄可能仍保留上月快取（例如 11 月檔案顯示 10 月日期）
   // 以檔名的起始年月作為參照，若主體年月不一致，則整體平移月份，避免月份缺漏（例如缺少 11 月）。
   const fileStart = parseFileStartFromName(fileName);
+  const fileSpan = parseFileSpanFromName(fileName);
   if (fileStart && out.length) {
     const expYM = toISO(fileStart).slice(0,7);
+    const coveredMonths = fileSpan ? monthKeysBetween(toISO(fileSpan.start), toISO(fileSpan.end)) : [expYM];
     const counts = new Map();
     for (const r of out) {
       const ym = String(r.date).slice(0,7);
@@ -1566,13 +1567,19 @@ function parseSummaryFromWB(wb, fileName) {
     for (const [k, v] of counts.entries()) {
       if (v > domN) { domN = v; domYM = k; }
     }
-    const a = ymToIndex(domYM);
-    const b = ymToIndex(expYM);
-    if (a != null && b != null && domYM && expYM && domYM !== expYM) {
-      const delta = b - a;
-      // 僅在差距合理（±2 個月）時才平移，避免誤判
-      if (Math.abs(delta) <= 2) {
-        for (const r of out) r.date = shiftISOByMonths(r.date, delta);
+
+    // 跨月檔（如 0331-0413）允許主體月份落在 4 月，不可強制平移回 3 月，
+    // 否則會把 4/1 之後資料整段錯移而導致 4 月週別顯示為 0。
+    const isCovered = domYM && coveredMonths.includes(domYM);
+    if (!isCovered) {
+      const a = ymToIndex(domYM);
+      const b = ymToIndex(expYM);
+      if (a != null && b != null && domYM && expYM && domYM !== expYM) {
+        const delta = b - a;
+        // 僅在差距合理（±2 個月）時才平移，避免誤判
+        if (Math.abs(delta) <= 2) {
+          for (const r of out) r.date = shiftISOByMonths(r.date, delta);
+        }
       }
     }
   }
@@ -1888,8 +1895,8 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
   // 從工作表名推估「當日」日期（用於沒有日期欄位的明細）
   function sheetNameToISO(sheetName) {
     const n = String(sheetName || '').replace(/\s+/g, '');
-    // 0701合計 / 07/01合計 / 07-01合計
-    let m = n.match(/^(\d{2})[\/-]?(\d{2})合計$/);
+    // 0701 / 07/01 / 07-01 / 0701合計 / 07/01合計 / 07-01合計
+    let m = n.match(/^(\d{2})[\/-]?(\d{2})(?:合計)?$/);
     if (m && yearHint) return toISOFromYMD(yearHint, m[1], m[2]);
     // 合計0701 / 合計07/01
     m = n.match(/^合計(\d{2})[\/-]?(\d{2})$/);
@@ -1897,8 +1904,8 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     // 合計1231 這種（已在上一條 cover），但容錯
     m = n.match(/^合計(\d{4})$/);
     if (m && yearHint) return toISOFromYMD(yearHint, m[1].slice(0,2), m[1].slice(2,4));
-    // 2025-07-01 合計 (容錯)
-    m = n.match(/^(20\d{2})[\/-](\d{2})[\/-](\d{2}).*合計$/);
+    // 2025-07-01 / 2025-07-01合計
+    m = n.match(/^(20\d{2})[\/-](\d{2})[\/-](\d{2})(?:.*合計)?$/);
     if (m) return toISOFromYMD(m[1], m[2], m[3]);
     return null; // 01-30合計 等區間表：必須靠欄位日期
   }
@@ -1907,7 +1914,8 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
   const candidateSheets = wb.SheetNames
     .filter(sn => {
       const n = String(sn || '').replace(/\s+/g, '');
-      if (!n.includes('合計')) return false;
+      const looksDaily = !!sheetNameToISO(sn);
+      if (!looksDaily && !n.includes('合計')) return false;
       // 排除明顯的彙總表
       if (/各日合計|日別報廢率總表|報廢率總表|前10名|共用類|KPI/i.test(n)) return false;
       return true;
