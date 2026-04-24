@@ -1664,7 +1664,7 @@ function parseTop20FromWB(wb, fileName){
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
     if (!rows || !rows.length) continue;
 
-    const headerRows = Math.min(6, rows.length);
+    const headerRows = Math.min(8, rows.length);
     const maxC = Math.max(...rows.slice(0, headerRows).map(r => (r || []).length), 0);
     const colLabels = new Array(maxC).fill("");
     for (let c=0; c<maxC; c++){
@@ -1676,42 +1676,79 @@ function parseTop20FromWB(wb, fileName){
       colLabels[c] = parts.join("|");
     }
 
-    const findCol = (needList)=>{
+    // 前二十大明細表的「商品名」與「半成品名」常為多層表頭或合併儲存格。
+    // 舊版用「名稱」作為半成品欄位的 fallback，容易抓到「商品名稱」欄，造成商品名/半成品名錯位。
+    // 這裡改用明確欄位辨識：商品欄不得包含半成品；半成品欄必須包含半成品。
+    const findCol = (needList, excludeList=[])=>{
+      let best = -1;
+      let bestScore = -1;
       for (let c=0; c<colLabels.length; c++){
         const h = normKey(colLabels[c]);
         if (!h) continue;
-        for (const n of needList){
-          if (h.includes(normKey(n))) return c;
+        let excluded = false;
+        for (const ex of excludeList){
+          const exn = normKey(ex);
+          if (exn && h.includes(exn)) { excluded = true; break; }
         }
+        if (excluded) continue;
+        for (const n of needList){
+          const nn = normKey(n);
+          if (!nn) continue;
+          if (h === nn) return c;
+          if (h.includes(nn)){
+            const score = nn.length;
+            if (score > bestScore){ bestScore = score; best = c; }
+          }
+        }
+      }
+      return best;
+    };
+
+    const findNearbyProductCol = (semiCol)=>{
+      if (semiCol == null || semiCol < 0) return -1;
+      // 常見版面為：排序｜商品名｜半成品名｜單價｜金額...
+      const candidates = [semiCol-1, semiCol-2, semiCol+1, semiCol+2];
+      for (const c of candidates){
+        if (c < 0 || c >= colLabels.length) continue;
+        const h = normKey(colLabels[c]);
+        if (!h) continue;
+        if ((h.includes(normKey('商品名')) || h.includes(normKey('商品名稱')) || h.includes(normKey('商品'))) && !h.includes(normKey('半成品'))) return c;
       }
       return -1;
     };
 
-    const cSort     = findCol(['排序']);
-    const cSemiName = findCol(['半成品|名稱','半成品名稱','半成品','名稱']);
+    const cSort     = findCol(['排序','排名','序號']);
+    const cSemiName = findCol(['半成品名稱','半成品名','半成品'], ['商品']);
+    let cProduct    = findCol(['備註商品名稱','備註-商品名稱','備註商品名','商品名稱','商品名','商品'], ['半成品','分析原因','原因說明','後續對策','單價','金額','排序','排名','序號']);
+    if (cProduct < 0) cProduct = findNearbyProductCol(cSemiName);
+
     const cAmt      = (kind==='scrap') ? findCol(['報廢金額']) : findCol(['超用金額']);
     const cUnit     = findCol(['單價']);
-    const cReason   = findCol(['分析原因']);
+    const cReason   = findCol(['分析原因','原因別','原因分類']);
     const cDesc     = findCol(['原因說明']);
-    const cAct      = findCol(['後續對策']);
-    const cNoteProd = findCol(['備註商品名稱','備註-商品名稱','備註|商品名稱']);
+    const cAct      = findCol(['後續對策','對策']);
 
-    const dataStart = 6;
+    // 由「排序」欄後第一列開始掃描；若找不到排序欄，保留原本第 6 列開始的邏輯。
+    const dataStart = Math.min(rows.length, Math.max(6, headerRows));
     for (let r=dataStart; r<rows.length; r++){
       const row = rows[r] || [];
       const sortVal = (cSort>=0) ? asNumber(row[cSort]) : NaN;
-      const semi = safeStr(row[cSemiName]).trim();
-      const reason = safeStr(row[cReason]).trim();
-      const desc = safeStr(row[cDesc]).trim();
-      const act  = safeStr(row[cAct]).trim();
-      const prodNote = safeStr(row[cNoteProd]).trim();
+      const semi = (cSemiName>=0) ? safeStr(row[cSemiName]).trim() : '';
+      const productRaw = (cProduct>=0) ? safeStr(row[cProduct]).trim() : '';
+      const reason = (cReason>=0) ? safeStr(row[cReason]).trim() : '';
+      const desc = (cDesc>=0) ? safeStr(row[cDesc]).trim() : '';
+      const act  = (cAct>=0) ? safeStr(row[cAct]).trim() : '';
 
       if (!(Number.isFinite(sortVal) && sortVal >= 1 && sortVal <= 20)) continue;
-      if (!semi && !reason && !desc && !act) continue;
+      if (!semi && !productRaw && !reason && !desc && !act) continue;
 
-      const amt = asNumber(row[cAmt]);
+      const amt = (cAmt>=0) ? asNumber(row[cAmt]) : NaN;
       const unitPrice = (cUnit>=0) ? asNumber(row[cUnit]) : NaN;
-      const product = prodNote || semi;
+
+      // 商品名不可再 fallback 成半成品名，否則會造成畫面看起來「商品/半成品對不上」。
+      // 若來源表沒有商品名，先留空，後續 render 時會用半成品展開資料輔助補正。
+      const product = productRaw || '';
+      const semiName = semi || '';
 
       out.push({
         kind,
@@ -1720,7 +1757,7 @@ function parseTop20FromWB(wb, fileName){
         reason,
         reasonKey: normalizeReasonKey(reason),
         product,
-        semi: semi || product,
+        semi: semiName,
         unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
         amt: Number.isFinite(amt) ? amt : 0,
         desc,
@@ -1732,6 +1769,7 @@ function parseTop20FromWB(wb, fileName){
   }
   return out;
 }
+
 
 // return previous-month key based on a date
 function prevMonthKeyFromISO(endISO){
