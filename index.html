@@ -1863,13 +1863,14 @@ function renderTop20Modal(){
   // sort by amount desc
   rows.sort((a,b)=>(b.amt||0)-(a.amt||0));
   for (const r of rows){
-    const k = normKey(r.product)+'|'+normKey(r.semi)+'|'+normKey(r.reason);
+    const fixedPair = resolveTop20DisplayPair(r, kind);
+    const k = normKey(fixedPair.product)+'|'+normKey(fixedPair.semi)+'|'+normKey(r.reason);
     const dup = dupSet.has(k) ? '是' : '否';
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.product)}</td>
-      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(r.semi)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.product || '—')}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.semi || '—')}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
@@ -4144,6 +4145,73 @@ function openTop20ExpandForReason(reasonKey){
 }
 
 
+
+function resolveTop20DisplayPair(r, kind){
+  // 前二十大來源（JFM）中的商品名欄有時會因合併儲存格/備註欄而錯位。
+  // 顯示時優先用半成品報廢管理表明細（state.details）依「半成品名 + 金額」反查正確商品名。
+  const fallback = {
+    product: safeStr(r?.product || '').trim(),
+    semi: safeStr(r?.semi || '').trim(),
+    unitPrice: (r && r.unitPrice != null && isFinite(r.unitPrice)) ? Number(r.unitPrice) : null
+  };
+
+  const semiKey = normKey(fallback.semi);
+  if (!semiKey || !Array.isArray(state.details) || !state.details.length) return fallback;
+
+  let start = null, end = null;
+  try{
+    const range = getDateRange();
+    start = range.start; end = range.end;
+  }catch(_){
+    start = state.selection?.start || null;
+    end = state.selection?.end || null;
+  }
+
+  const metric = (kind === 'scrap') ? 'scrapAmt' : 'overuseAmt';
+  const targetAmt = Number(r?.amt || 0);
+  const targetUnit = Number(r?.unitPrice);
+  const map = new Map();
+
+  for (const d of state.details){
+    if (start && end && (d.date < start || d.date > end)) continue;
+    if (normKey(d.semi) !== semiKey) continue;
+    const product = safeStr(d.product || '').trim();
+    const semi = safeStr(d.semi || '').trim();
+    if (!product || !semi) continue;
+    const k = product + '||' + semi;
+    if (!map.has(k)) map.set(k, {product, semi, amt:0, unitSum:0, unitN:0, rows:0});
+    const o = map.get(k);
+    o.amt += Number(d[metric]) || 0;
+    const up = Number(d.price ?? d.unitPrice);
+    if (Number.isFinite(up) && up > 0){ o.unitSum += up; o.unitN += 1; }
+    o.rows += 1;
+  }
+
+  const candidates = Array.from(map.values());
+  if (!candidates.length) return fallback;
+
+  for (const c of candidates) c.unitPrice = c.unitN ? (c.unitSum / c.unitN) : null;
+
+  candidates.sort((a,b)=>{
+    const da = Math.abs((Number(a.amt)||0) - targetAmt);
+    const db = Math.abs((Number(b.amt)||0) - targetAmt);
+    if (da !== db) return da - db;
+    if (Number.isFinite(targetUnit)){
+      const ua = Number.isFinite(a.unitPrice) ? Math.abs(a.unitPrice-targetUnit) : Number.POSITIVE_INFINITY;
+      const ub = Number.isFinite(b.unitPrice) ? Math.abs(b.unitPrice-targetUnit) : Number.POSITIVE_INFINITY;
+      if (ua !== ub) return ua - ub;
+    }
+    return (b.rows||0) - (a.rows||0);
+  });
+
+  const best = candidates[0];
+  return {
+    product: best.product || fallback.product,
+    semi: best.semi || fallback.semi,
+    unitPrice: Number.isFinite(best.unitPrice) ? best.unitPrice : fallback.unitPrice
+  };
+}
+
 function jumpToItemFromTop20(prod, semi){
   try{
     prod = safeStr(prod).trim();
@@ -4209,15 +4277,16 @@ const tbody = $('top20ExpBody');
 
   rows.sort((a,b)=>(b.amt||0)-(a.amt||0));
   for (const r of rows){
-    const k = normKey(r.product) + '|' + normKey(r.semi) + '|' + normalizeReasonKey(r.reason);
+    const fixedPair = resolveTop20DisplayPair(r, kind);
+    const k = normKey(fixedPair.product) + '|' + normKey(fixedPair.semi) + '|' + normalizeReasonKey(r.reason);
     const cnt = dupCount.get(k) || 0;
     const dup = cnt > 0 ? (`是，${cnt}次`) : '否';
     const tr = document.createElement('tr');
     tr.className='border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.product)}</button></td>
-      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(r.product)}" data-semi="${escapeHTML(r.semi)}">${escapeHTML(r.semi)}</button></td>
-      <td class="py-2 pr-4 text-right whitespace-nowrap">${(r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—"}</td>
+      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.product || '—')}</button></td>
+      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.semi || '—')}</button></td>
+      <td class="py-2 pr-4 text-right whitespace-nowrap">${(fixedPair.unitPrice!=null && isFinite(fixedPair.unitPrice)) ? fmtCurrency(fixedPair.unitPrice) : ((r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—")}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.act||'')}</td>
