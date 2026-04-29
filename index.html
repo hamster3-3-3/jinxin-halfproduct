@@ -665,7 +665,6 @@ function monthKeyFromISO(iso){
               <option value="shared">共用類</option>
               <option value="nonShared">非共用類</option>
             </select>
-            <button id="groupQtyRateBtn" class="seg-btn" type="button">切換為比率</button>
             <div class="h-6 w-px bg-slate-200 mx-1"></div>
             <div class="text-xs muted">排序依據</div>
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
@@ -700,6 +699,9 @@ function monthKeyFromISO(iso){
         <div class="table-wrap">
           <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs muted flex flex-wrap items-center justify-between gap-2">
             <div>顯示：<span id="groupCount">0</span> 筆（最多 200 筆）</div>
+            <div class="flex items-center gap-2">
+              <button id="groupQtyRateBtn" class="seg-btn" type="button">切換為比率</button>
+            </div>
 </div>
           <div class="overflow-auto max-h-[420px]">
             <table>
@@ -732,8 +734,11 @@ function monthKeyFromISO(iso){
               <div class="flex flex-wrap gap-2 items-center" id="itemMetricWrap">
                 <button class="seg-btn" type="button" data-item-single="prodRate">實際生產率</button>
                 <button class="seg-btn active" type="button" data-item-single="diffAmt">差異金額</button>
+                <button class="seg-btn" type="button" data-item-single="diffRate">差異率</button>
                 <button class="seg-btn" type="button" data-item-single="scrapAmt">報廢金額</button>
+                <button class="seg-btn" type="button" data-item-single="scrapRate">報廢率</button>
                 <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
+                <button class="seg-btn" type="button" data-item-single="overuseRate">超用率</button>
                 <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
                 <button class="seg-btn" type="button" id="itemOrderOverlayBtn">訂單需求(副Y軸)</button>
               </div>
@@ -3799,6 +3804,19 @@ function renderItemChart(daily) {
       fmt: (v) => fmtMoney(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
     },
+    diffRate: {
+      label: '差異率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => {
+        const q = Number(r.diffQty), o = Number(r.order);
+        return (Number.isFinite(q) && Number.isFinite(o) && o > 0) ? (q / o) : null;
+      },
+      qtyField: 'diffQty',
+      orderField: 'order',
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
+    },
     scrapAmt: {
       label: '報廢金額',
       kind: 'amt',
@@ -3807,6 +3825,19 @@ function renderItemChart(daily) {
       fmt: (v) => fmtMoney(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
     },
+    scrapRate: {
+      label: '報廢率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => {
+        const q = Number(r.scrapQty), o = Number(r.order);
+        return (Number.isFinite(q) && Number.isFinite(o) && o > 0) ? (q / o) : null;
+      },
+      qtyField: 'scrapQty',
+      orderField: 'order',
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
+    },
     overuseAmt: {
       label: '超用金額',
       kind: 'amt',
@@ -3814,6 +3845,19 @@ function renderItemChart(daily) {
       get: (r) => r.overuseAmt,
       fmt: (v) => fmtMoney(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    overuseRate: {
+      label: '超用率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => {
+        const q = Number(r.overuseQty), o = Number(r.order);
+        return (Number.isFinite(q) && Number.isFinite(o) && o > 0) ? (q / o) : null;
+      },
+      qtyField: 'overuseQty',
+      orderField: 'order',
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
     },
     refillQty: {
       label: '補單量',
@@ -3868,10 +3912,18 @@ function renderItemChart(daily) {
 
   const buckets = new Map(); // key -> { d, label, metrics:{ metricKey:{sum,cnt} } }
 
-  const addToBucket = (key, d, label, metricKey, v) => {
+  const addToBucket = (key, d, label, metricKey, v, extra = null) => {
     if (!buckets.has(key)) buckets.set(key, { d, label, metrics: {} });
     const b = buckets.get(key);
-    if (!b.metrics[metricKey]) b.metrics[metricKey] = { sum: 0, cnt: 0 };
+    if (!b.metrics[metricKey]) b.metrics[metricKey] = { sum: 0, cnt: 0, qtySum: 0, orderSum: 0 };
+    if (extra && (extra.kind === 'ratioToOrder')) {
+      const q = Number(extra.qty);
+      const o = Number(extra.order);
+      if (!Number.isFinite(q) || !Number.isFinite(o) || o <= 0) return;
+      b.metrics[metricKey].qtySum += q;
+      b.metrics[metricKey].orderSum += o;
+      return;
+    }
     if (v == null || !Number.isFinite(Number(v))) return;
     b.metrics[metricKey].sum += Number(v);
     b.metrics[metricKey].cnt += 1;
@@ -3883,7 +3935,15 @@ function renderItemChart(daily) {
   const addRowMetrics = (key, d, label, r) => {
     for (const mk of metricKeys) {
       const mm = (mk === 'orderQty') ? orderMeta : m;
-      addToBucket(key, d, label, mk, mm.get(r));
+      if (mm && mm.qtyField && mm.orderField) {
+        addToBucket(key, d, label, mk, null, {
+          kind: 'ratioToOrder',
+          qty: r[mm.qtyField],
+          order: r[mm.orderField]
+        });
+      } else {
+        addToBucket(key, d, label, mk, mm.get(r));
+      }
     }
   };
 
@@ -3931,7 +3991,12 @@ function renderItemChart(daily) {
   const labels = points.map(p => p.label);
   const calcValues = (metricKey, metaObj) => points.map(p => {
     const mm = p.metrics[metricKey];
-    if (!mm || !mm.cnt) return null;
+    if (!mm) return null;
+    if (metaObj && metaObj.qtyField && metaObj.orderField) {
+      if (!Number.isFinite(mm.orderSum) || mm.orderSum <= 0) return null;
+      return mm.qtySum / mm.orderSum;
+    }
+    if (!mm.cnt) return null;
     return metaObj.kind === 'rate' ? (mm.sum / mm.cnt) : mm.sum;
   });
 
