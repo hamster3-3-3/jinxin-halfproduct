@@ -665,13 +665,17 @@ function monthKeyFromISO(iso){
               <option value="shared">共用類</option>
               <option value="nonShared">非共用類</option>
             </select>
+            <button id="groupQtyRateBtn" class="seg-btn" type="button">切換為比率</button>
             <div class="h-6 w-px bg-slate-200 mx-1"></div>
             <div class="text-xs muted">排序依據</div>
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
               <option value="diffAmt">差異金額（高→低）</option>
+              <option value="diffRate">差異率（高→低）</option>
               <option value="prodRate">實際生產率（高→低）</option>
               <option value="scrapAmt">報廢金額（高→低）</option>
+              <option value="scrapRate">報廢率（高→低）</option>
               <option value="overuseAmt">超用金額（高→低）</option>
+              <option value="overuseRate">超用率（高→低）</option>
               <option value="refillQty">補單量（高→低）</option>
             </select>
           </div>
@@ -707,9 +711,9 @@ function monthKeyFromISO(iso){
                   <th class="text-right">單價</th>
                   <th class="text-right">補單</th>
                   <th class="text-right">實際生產率</th>
-                  <th class="text-right">差異金額</th>
-                  <th class="text-right">報廢金額</th>
-                  <th class="text-right">超用金額</th>
+                  <th id="groupDiffHeader" class="text-right">差異金額</th>
+                  <th id="groupScrapHeader" class="text-right">報廢金額</th>
+                  <th id="groupOveruseHeader" class="text-right">超用金額</th>
                 </tr>
               </thead>
               <tbody id="groupTbody"></tbody>
@@ -814,6 +818,7 @@ const state = {
   itemMetricSelected: 'diffAmt',
   itemShowOrderDemand: false,
   detailQtyMode: 'qty', // qty|rate：日別明細的差異/報廢/超用顯示切換
+  groupQtyMode: 'qty', // qty|rate：半成品展開的差異/報廢/超用顯示切換
   prevDetailExpanded: false, // 是否展開前一段時間範圍的日別明細
   rightMode: 'scrapTop10',
   rightMetric: 'amt',
@@ -3343,8 +3348,11 @@ function aggregateGroups(drows) {
         order: 0,
         output: 0,
         refillQty: 0,
+        diffQty: 0,
         diffAmt: 0,
+        scrapQty: 0,
         scrapAmt: 0,
+        overuseQty: 0,
         overuseAmt: 0,
         unitPriceSum: 0,
         unitPriceN: 0
@@ -3354,11 +3362,14 @@ function aggregateGroups(drows) {
     o.order += Number(r.order) || 0;
     o.output += Number(r.output) || 0;
     o.refillQty += Number(r.refill) || 0;
+    o.diffQty += Math.abs(Number(r.diffQty) || 0);
     o.diffAmt += Math.abs(Number(r.diffAmt) || 0);
+    o.scrapQty += Number(r.scrapQty) || 0;
     o.scrapAmt += Number(r.scrapAmt) || 0;
+    const overQty = Number(r.overuseQty);
+    if (Number.isFinite(overQty)) o.overuseQty += overQty;
     o.overuseAmt += Number(r.overuseAmt) || 0;
 
-    // 單價：來自合計XX分頁 D欄（parseDetailsFromWB 會寫入 r.price / r.unitPrice）
     const p = Number(r.price ?? r.unitPrice);
     if (Number.isFinite(p) && p > 0) {
       o.unitPriceSum += p;
@@ -3368,9 +3379,38 @@ function aggregateGroups(drows) {
   const out = Array.from(map.values());
   for (const o of out) {
     o.prodRate = o.order > 0 ? (o.output / o.order) : null;
+    o.diffRate = o.order > 0 ? (o.diffQty / o.order) : null;
+    o.scrapRate = o.order > 0 ? (o.scrapQty / o.order) : null;
+    o.overuseRate = o.order > 0 ? (o.overuseQty / o.order) : null;
     o.unitPrice = o.unitPriceN ? (o.unitPriceSum / o.unitPriceN) : null;
   }
   return out;
+}
+
+function fmtGroupMetricValue(row, key){
+  const isRate = state.groupQtyMode === 'rate';
+  if (key === 'diff') return isRate ? (row.diffRate == null ? '—' : fmtPct(row.diffRate)) : fmtMoney(row.diffAmt);
+  if (key === 'scrap') return isRate ? (row.scrapRate == null ? '—' : fmtPct(row.scrapRate)) : fmtMoney(row.scrapAmt);
+  if (key === 'overuse') return isRate ? (row.overuseRate == null ? '—' : fmtPct(row.overuseRate)) : fmtMoney(row.overuseAmt);
+  return '—';
+}
+
+function syncGroupQtyRateHeaders(){
+  const isRate = state.groupQtyMode === 'rate';
+  const map = [
+    ['groupDiffHeader', isRate ? '差異率' : '差異金額'],
+    ['groupScrapHeader', isRate ? '報廢率' : '報廢金額'],
+    ['groupOveruseHeader', isRate ? '超用率' : '超用金額'],
+  ];
+  for (const [id, txt] of map){
+    const el = $(id);
+    if (el) el.textContent = txt;
+  }
+  const btn = $('groupQtyRateBtn');
+  if (btn) {
+    btn.textContent = isRate ? '切換為金額' : '切換為比率';
+    btn.classList.toggle('active', isRate);
+  }
 }
 
 function applyGroupFilterAndRender(drows) {
@@ -3379,6 +3419,8 @@ function applyGroupFilterAndRender(drows) {
     state.groupRows = aggregateGroups(drows);
     state._groupRangeKey = rangeKey;
   }
+
+  syncGroupQtyRateHeaders();
 
   const kwProd = $('productSearch').value.trim().toLowerCase();
   const kwSemi = $('semiSearch').value.trim().toLowerCase();
@@ -3397,13 +3439,18 @@ function applyGroupFilterAndRender(drows) {
 
   const sort = $('sortSel').value;
   const by = (k) => (a,b) => (Number(b[k])||0) - (Number(a[k])||0);
+  const byNullable = (k) => (a,b) => {
+    const va = (a[k] == null ? -Infinity : Number(a[k]));
+    const vb = (b[k] == null ? -Infinity : Number(b[k]));
+    return vb - va;
+  };
   if (sort === 'diffAmt') filtered.sort(by('diffAmt'));
-  if (sort === 'prodRate') {
-    const v = (x) => (x==null ? -Infinity : Number(x));
-    filtered.sort((a,b) => v(b.prodRate) - v(a.prodRate));
-  }
+  if (sort === 'diffRate') filtered.sort(byNullable('diffRate'));
+  if (sort === 'prodRate') filtered.sort(byNullable('prodRate'));
   if (sort === 'scrapAmt') filtered.sort(by('scrapAmt'));
+  if (sort === 'scrapRate') filtered.sort(byNullable('scrapRate'));
   if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
+  if (sort === 'overuseRate') filtered.sort(byNullable('overuseRate'));
   if (sort === 'refillQty') filtered.sort(by('refillQty'));
 
   state.filteredGroups = filtered.slice(0,200);
@@ -3421,9 +3468,9 @@ function applyGroupFilterAndRender(drows) {
       <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
       <td class="text-right mono">${fmtInt(r.refillQty)}</td>
       <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
-      <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
-      <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
-      <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+      <td class="text-right mono">${fmtGroupMetricValue(r, 'diff')}</td>
+      <td class="text-right mono">${fmtGroupMetricValue(r, 'scrap')}</td>
+      <td class="text-right mono">${fmtGroupMetricValue(r, 'overuse')}</td>
     `;
     tr.addEventListener('click', () => {
       state.selectedKey = r.key;
@@ -3432,7 +3479,6 @@ function applyGroupFilterAndRender(drows) {
     tbody.appendChild(tr);
   }
 
-  // if selected item no longer in filtered list, hide
   if (state.selectedKey && !filtered.some(x => x.key === state.selectedKey)) {
     state.selectedKey = null;
     $('itemPanel').classList.add('hidden');
@@ -4190,6 +4236,13 @@ function wireUI() {
 
   // group filters
   $('sortSel').addEventListener('change', () => renderAll());
+  const groupQtyRateBtn = $('groupQtyRateBtn');
+  if (groupQtyRateBtn) {
+    groupQtyRateBtn.addEventListener('click', () => {
+      state.groupQtyMode = (state.groupQtyMode === 'rate') ? 'qty' : 'rate';
+      renderAll();
+    });
+  }
   const _sharedSel = document.getElementById('sharedClassSel');
   if (_sharedSel) _sharedSel.addEventListener('change', () => renderAll());
   $('productSearch').addEventListener('input', () => {
