@@ -670,7 +670,9 @@ function monthKeyFromISO(iso){
             <select id="sortSel" class="rounded-xl border border-slate-200 px-3 py-2 bg-white">
               <option value="diffAmt">差異金額（高→低）</option>
               <option value="diffRate">差異率（高→低）</option>
-              <option value="prodRate">實際生產率（高→低）</option>
+              <option value="prodRate">總產出率（高→低）</option>
+              <option value="expandRate">生管展開率（高→低）</option>
+              <option value="actualRate">生產實際產出率（高→低）</option>
               <option value="scrapAmt">報廢金額（高→低）</option>
               <option value="scrapRate">報廢率（高→低）</option>
               <option value="overuseAmt">超用金額（高→低）</option>
@@ -3630,12 +3632,28 @@ function aggregateGroups(drows) {
         order: 0,
         output: 0,
         refillQty: 0,
+        refillQtyNew: 0,
         diffQty: 0,
         diffAmt: 0,
         scrapQty: 0,
         scrapAmt: 0,
         overuseQty: 0,
         overuseAmt: 0,
+        expandQty: 0,
+        actualQty: 0,
+        expandRateNumer: 0,
+        expandRateDenom: 0,
+        actualRateNumer: 0,
+        actualRateDenom: 0,
+        refillRateNumer: 0,
+        refillRateDenom: 0,
+        prodRateNumer: 0,
+        prodRateDenom: 0,
+        scrapRateNumer: 0,
+        scrapRateDenom: 0,
+        overuseRateNumer: 0,
+        overuseRateDenom: 0,
+        hasNewDetail: false,
         unitPriceSum: 0,
         unitPriceN: 0
       });
@@ -3644,6 +3662,7 @@ function aggregateGroups(drows) {
     o.order += Number(r.order) || 0;
     o.output += Number(r.output) || 0;
     o.refillQty += Number(r.refill) || 0;
+    o.refillQtyNew += Number(r.refillQtyNew) || 0;
     o.diffQty += Math.abs(Number(r.diffQty) || 0);
     o.diffAmt += Math.abs(Number(r.diffAmt) || 0);
     o.scrapQty += Number(r.scrapQty) || 0;
@@ -3651,6 +3670,25 @@ function aggregateGroups(drows) {
     const overQty = Number(r.overuseQty);
     if (Number.isFinite(overQty)) o.overuseQty += overQty;
     o.overuseAmt += Number(r.overuseAmt) || 0;
+    o.expandQty += Number(r.expandQty) || 0;
+    o.actualQty += Number(r.actualQty) || 0;
+    if (r._detailFormat === 'new') o.hasNewDetail = true;
+
+    const order = Number(r.order);
+    if (Number.isFinite(order) && order > 0) {
+      const prodRate = Number(r.prodRate);
+      if (Number.isFinite(prodRate)) { o.prodRateNumer += prodRate * order; o.prodRateDenom += order; }
+      const expandRate = Number(r.expandRate);
+      if (Number.isFinite(expandRate)) { o.expandRateNumer += expandRate * order; o.expandRateDenom += order; }
+      const actualRate = Number(r.actualRate);
+      if (Number.isFinite(actualRate)) { o.actualRateNumer += actualRate * order; o.actualRateDenom += order; }
+      const refillRateNew = Number(r.refillRateNew);
+      if (Number.isFinite(refillRateNew)) { o.refillRateNumer += refillRateNew * order; o.refillRateDenom += order; }
+      const scrapRate = Number(r.scrapRate);
+      if (Number.isFinite(scrapRate)) { o.scrapRateNumer += scrapRate * order; o.scrapRateDenom += order; }
+      const overuseRate = Number(r.overuseRate);
+      if (Number.isFinite(overuseRate)) { o.overuseRateNumer += overuseRate * order; o.overuseRateDenom += order; }
+    }
 
     const p = Number(r.price ?? r.unitPrice);
     if (Number.isFinite(p) && p > 0) {
@@ -3660,10 +3698,13 @@ function aggregateGroups(drows) {
   }
   const out = Array.from(map.values());
   for (const o of out) {
-    o.prodRate = o.order > 0 ? (o.output / o.order) : null;
+    o.prodRate = o.order > 0 ? (o.output / o.order) : (o.prodRateDenom > 0 ? (o.prodRateNumer / o.prodRateDenom) : null);
     o.diffRate = o.order > 0 ? (o.diffQty / o.order) : null;
-    o.scrapRate = o.order > 0 ? (o.scrapQty / o.order) : null;
-    o.overuseRate = o.order > 0 ? (o.overuseQty / o.order) : null;
+    o.scrapRate = o.order > 0 ? (o.scrapQty / o.order) : (o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : null);
+    o.overuseRate = o.order > 0 ? (o.overuseQty / o.order) : (o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : null);
+    o.expandRate = o.hasNewDetail ? (o.order > 0 ? (o.expandQty / o.order) : (o.expandRateDenom > 0 ? (o.expandRateNumer / o.expandRateDenom) : null)) : null;
+    o.actualRate = o.hasNewDetail ? (o.order > 0 ? (o.actualQty / o.order) : (o.actualRateDenom > 0 ? (o.actualRateNumer / o.actualRateDenom) : null)) : null;
+    o.refillRateNew = o.hasNewDetail ? (o.order > 0 ? (o.refillQtyNew / o.order) : (o.refillRateDenom > 0 ? (o.refillRateNumer / o.refillRateDenom) : null)) : null;
     o.unitPrice = o.unitPriceN ? (o.unitPriceSum / o.unitPriceN) : null;
   }
   return out;
@@ -3677,20 +3718,104 @@ function fmtGroupMetricValue(row, key){
   return '—';
 }
 
+function fmtQtyValue(n){
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return v.toLocaleString('zh-TW', {minimumFractionDigits:0, maximumFractionDigits:2});
+}
 
 function isMay2026OrLaterRange(){
   try{
     const r = getDateRange();
-    const end = safeStr(r && r.end);
-    return !!end && end >= '2026-05-01';
+    const start = safeStr(r && r.start);
+    return !!start && start >= '2026-05-01';
   }catch(e){
-    const end = safeStr(state?.selection?.end || state?.dateMax || '');
-    return !!end && end >= '2026-05-01';
+    const start = safeStr(state?.selection?.start || state?.dateMin || '');
+    return !!start && start >= '2026-05-01';
   }
+}
+
+function getMayGroupColumns(sortValue){
+  const sort = sortValue || ($('sortSel') ? $('sortSel').value : 'prodRate');
+  if (sort === 'scrapAmt' || sort === 'scrapRate') {
+    return [
+      { label:'報廢數', field:'scrapQty', type:'qty' },
+      { label:'報廢率', field:'scrapRate', type:'rate' },
+      { label:'報廢金額', field:'scrapAmt', type:'money' }
+    ];
+  }
+  if (sort === 'overuseAmt' || sort === 'overuseRate') {
+    return [
+      { label:'超用數', field:'overuseQty', type:'qty' },
+      { label:'超用率', field:'overuseRate', type:'rate' },
+      { label:'超用金額', field:'overuseAmt', type:'money' }
+    ];
+  }
+  if (sort === 'expandRate') {
+    return [
+      { label:'生管展開量', field:'expandQty', type:'qty' },
+      { label:'生管展開率', field:'expandRate', type:'rate' },
+      { label:'超用金額', field:'overuseAmt', type:'money' }
+    ];
+  }
+  if (sort === 'actualRate') {
+    return [
+      { label:'生產實際產出量', field:'actualQty', type:'qty' },
+      { label:'生產實際產出率', field:'actualRate', type:'rate' },
+      { label:'超用金額', field:'overuseAmt', type:'money' }
+    ];
+  }
+  if (sort === 'refillQty') {
+    return [
+      { label:'生產補單量', field:'refillQtyNew', type:'qty' },
+      { label:'生產補單率', field:'refillRateNew', type:'rate' },
+      { label:'超用金額', field:'overuseAmt', type:'money' }
+    ];
+  }
+  // prodRate = 總產出率
+  return [
+    { label:'總產出量', field:'output', type:'qty' },
+    { label:'總產出率', field:'prodRate', type:'rate' },
+    { label:'超用金額', field:'overuseAmt', type:'money' }
+  ];
+}
+
+function fmtMayGroupCell(row, col){
+  const v = row[col.field];
+  if (col.type === 'rate') return v == null ? '—' : fmtPct(v);
+  if (col.type === 'money') return fmtMoney(v);
+  return fmtQtyValue(v);
+}
+
+function buildGroupHeaderHTML(){
+  const isNew = isMay2026OrLaterRange();
+  if (isNew) {
+    const cols = getMayGroupColumns();
+    return `
+      <th>商品名</th>
+      <th>半成品名</th>
+      <th>上市日期</th>
+      <th class="text-right">單價</th>
+      ${cols.map(c => `<th class="text-right">${c.label}</th>`).join('')}
+    `;
+  }
+  const isRate = state.groupQtyMode === 'rate';
+  return `
+    <th>商品名</th>
+    <th>半成品名</th>
+    <th>上市日期</th>
+    <th class="text-right">單價</th>
+    <th class="text-right">補單</th>
+    <th class="text-right">實際生產率</th>
+    <th id="groupDiffHeader" class="text-right">${isRate ? '差異率' : '差異金額'}</th>
+    <th id="groupScrapHeader" class="text-right">${isRate ? '報廢率' : '報廢金額'}</th>
+    <th id="groupOveruseHeader" class="text-right">${isRate ? '超用率' : '超用金額'}</th>
+  `;
 }
 
 function syncMayGroupColumnsAndSort(){
   const isNew = isMay2026OrLaterRange();
+  state._useMayGroupLayout = isNew;
   state._hideGroupDiffColumns = isNew;
 
   const sel = $('sortSel');
@@ -3701,29 +3826,38 @@ function syncMayGroupColumnsAndSort(){
       opt.hidden = isNew;
       opt.style.display = isNew ? 'none' : '';
     });
+
+    const newOptions = sel.querySelectorAll('option[value="expandRate"], option[value="actualRate"]');
+    newOptions.forEach(opt => {
+      opt.disabled = !isNew;
+      opt.hidden = !isNew;
+      opt.style.display = !isNew ? 'none' : '';
+    });
+
+    const prodOpt = sel.querySelector('option[value="prodRate"]');
+    if (prodOpt) prodOpt.textContent = isNew ? '總產出率（高→低）' : '實際生產率（高→低）';
+
     if (isNew && (sel.value === 'diffAmt' || sel.value === 'diffRate')) {
+      sel.value = 'prodRate';
+    }
+    if (!isNew && (sel.value === 'expandRate' || sel.value === 'actualRate')) {
       sel.value = 'prodRate';
     }
   }
 
-  const h = $('groupDiffHeader');
-  if (h) h.style.display = isNew ? 'none' : '';
+  const btn = $('groupQtyRateBtn');
+  if (btn) btn.style.display = isNew ? 'none' : '';
 }
 
 function syncGroupQtyRateHeaders(){
   syncMayGroupColumnsAndSort();
-  const isRate = state.groupQtyMode === 'rate';
-  const map = [
-    ['groupDiffHeader', isRate ? '差異率' : '差異金額'],
-    ['groupScrapHeader', isRate ? '報廢率' : '報廢金額'],
-    ['groupOveruseHeader', isRate ? '超用率' : '超用金額'],
-  ];
-  for (const [id, txt] of map){
-    const el = $(id);
-    if (el) el.textContent = txt;
-  }
+  const table = $('groupTbody') ? $('groupTbody').closest('table') : null;
+  const headRow = table ? table.querySelector('thead tr') : null;
+  if (headRow) headRow.innerHTML = buildGroupHeaderHTML();
+
   const btn = $('groupQtyRateBtn');
   if (btn) {
+    const isRate = state.groupQtyMode === 'rate';
     btn.textContent = isRate ? '切換為金額' : '切換為比率';
     btn.classList.toggle('active', isRate);
   }
@@ -3755,6 +3889,7 @@ function applyGroupFilterAndRender(drows) {
 
   syncMayGroupColumnsAndSort();
   const sort = $('sortSel').value;
+  const isNewLayout = !!state._useMayGroupLayout;
   const by = (k) => (a,b) => (Number(b[k])||0) - (Number(a[k])||0);
   const byNullable = (k) => (a,b) => {
     const va = (a[k] == null ? -Infinity : Number(a[k]));
@@ -3764,31 +3899,44 @@ function applyGroupFilterAndRender(drows) {
   if (sort === 'diffAmt') filtered.sort(by('diffAmt'));
   if (sort === 'diffRate') filtered.sort(byNullable('diffRate'));
   if (sort === 'prodRate') filtered.sort(byNullable('prodRate'));
+  if (sort === 'expandRate') filtered.sort(byNullable('expandRate'));
+  if (sort === 'actualRate') filtered.sort(byNullable('actualRate'));
   if (sort === 'scrapAmt') filtered.sort(by('scrapAmt'));
   if (sort === 'scrapRate') filtered.sort(byNullable('scrapRate'));
   if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
   if (sort === 'overuseRate') filtered.sort(byNullable('overuseRate'));
-  if (sort === 'refillQty') filtered.sort(by('refillQty'));
+  if (sort === 'refillQty') filtered.sort(isNewLayout ? by('refillQtyNew') : by('refillQty'));
 
   state.filteredGroups = filtered.slice(0,200);
   $('groupCount').textContent = state.filteredGroups.length.toLocaleString('zh-TW');
 
   const tbody = $('groupTbody');
   tbody.innerHTML = '';
+  const mayCols = isNewLayout ? getMayGroupColumns(sort) : [];
   for (const r of state.filteredGroups) {
     const tr = document.createElement('tr');
     tr.className = 'cursor-pointer';
-    tr.innerHTML = `
-      <td>${r.product}</td>
-      <td class="muted">${r.semi}</td>
-      <td class="mono">${getLaunchCellHTML(r.product)}</td>
-      <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
-      <td class="text-right mono">${fmtInt(r.refillQty)}</td>
-      <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
-      ${state._hideGroupDiffColumns ? '' : `<td class="text-right mono">${fmtGroupMetricValue(r, 'diff')}</td>`}
-      <td class="text-right mono">${fmtGroupMetricValue(r, 'scrap')}</td>
-      <td class="text-right mono">${fmtGroupMetricValue(r, 'overuse')}</td>
-    `;
+    if (isNewLayout) {
+      tr.innerHTML = `
+        <td>${r.product}</td>
+        <td class="muted">${r.semi}</td>
+        <td class="mono">${getLaunchCellHTML(r.product)}</td>
+        <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
+        ${mayCols.map(c => `<td class="text-right mono">${fmtMayGroupCell(r, c)}</td>`).join('')}
+      `;
+    } else {
+      tr.innerHTML = `
+        <td>${r.product}</td>
+        <td class="muted">${r.semi}</td>
+        <td class="mono">${getLaunchCellHTML(r.product)}</td>
+        <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
+        <td class="text-right mono">${fmtInt(r.refillQty)}</td>
+        <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
+        <td class="text-right mono">${fmtGroupMetricValue(r, 'diff')}</td>
+        <td class="text-right mono">${fmtGroupMetricValue(r, 'scrap')}</td>
+        <td class="text-right mono">${fmtGroupMetricValue(r, 'overuse')}</td>
+      `;
+    }
     tr.addEventListener('click', () => {
       state.selectedKey = r.key;
       renderSelectedItem();
