@@ -2005,9 +2005,12 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     };
 
     const maxLen = Math.max(h1.length, h2.length);
+    let carryTop = '';
     for (let j = 0; j < maxLen; j++) {
-      const top = norm(h1[j]);
+      const rawTop = norm(h1[j]);
       const sub = norm(h2[j]);
+      const top = rawTop || carryTop;
+      if (rawTop) carryTop = rawTop;
 
       if (idx.date == null && /資料登錄日|日期/.test(top)) idx.date = j;
       if (idx.product == null && /商品名|商品名稱|品名|商品/.test(top)) idx.product = j;
