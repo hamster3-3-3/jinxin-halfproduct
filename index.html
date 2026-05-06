@@ -756,6 +756,7 @@ function monthKeyFromISO(iso){
                   <span id="prevDetailRangeLabel" class="text-xs muted"></span>
                 </div>
                 <div class="flex gap-2">
+                  <button id="detailExpandOutputBtn" class="seg-btn" type="button">切換為展開產出</button>
                   <button id="detailQtyRateBtn" class="seg-btn" type="button">切換為比率</button>
                   <button id="exportCsvBtn" class="seg-btn">下載 CSV</button>
                 </div>
@@ -822,7 +823,8 @@ const state = {
   kpiSelected: ['sales'],
   itemMetricSelected: 'diffAmt',
   itemShowOrderDemand: false,
-  detailQtyMode: 'qty', // qty|rate：日別明細的差異/報廢/超用顯示切換
+  detailQtyMode: 'qty', // qty|rate：日別明細顯示切換
+  detailNewMetricMode: 'scrapOver', // scrapOver|expandOutput：新版明細顯示模式
   groupQtyMode: 'qty', // qty|rate：半成品展開的差異/報廢/超用顯示切換
   prevDetailExpanded: false, // 是否展開前一段時間範圍的日別明細
   rightMode: 'scrapTop10',
@@ -2009,6 +2011,9 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     const h2 = aoa[hRow + 1] || [];
     const idx = {
       date: null, product: null, semi: null, price: null, order: null,
+      expandQty: null, expandRate: null,
+      actualQty: null, actualRate: null,
+      refillQtyNew: null, refillRateNew: null,
       outputKg: null, outputRate: null,
       scrapQty: null, scrapRate: null, scrapAmt: null,
       overuseQty: null, overuseRate: null, overuseAmt: null
@@ -2027,6 +2032,15 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       if (idx.semi == null && /半成品名|半成品名稱|半成品/.test(top)) idx.semi = j;
       if (idx.price == null && /半成品單價|單價|價格/.test(top)) idx.price = j;
       if (idx.order == null && /訂單需求|訂單/.test(top)) idx.order = j;
+
+      if (top.includes('生管展開') && sub === 'kg' && idx.expandQty == null) idx.expandQty = j;
+      if (top.includes('生管展開') && sub.includes('%') && idx.expandRate == null) idx.expandRate = j;
+
+      if (top.includes('生產實際產出') && sub === 'kg' && idx.actualQty == null) idx.actualQty = j;
+      if (top.includes('生產實際產出') && sub.includes('%') && idx.actualRate == null) idx.actualRate = j;
+
+      if (top.includes('生產補單') && sub === 'kg' && idx.refillQtyNew == null) idx.refillQtyNew = j;
+      if (top.includes('生產補單') && sub.includes('%') && idx.refillRateNew == null) idx.refillRateNew = j;
 
       if (top.includes('總產出') && sub === 'kg' && idx.outputKg == null) idx.outputKg = j;
       if (top.includes('總產出') && sub.includes('%') && idx.outputRate == null) idx.outputRate = j;
@@ -2071,6 +2085,12 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       if (!iso) continue;
 
       const order = asNumber(row[idx.order]);
+      const expandQty = asNumber(row[idx.expandQty]);
+      let expandRate = normalizeExcelRate(row[idx.expandRate]);
+      const actualQty = asNumber(row[idx.actualQty]);
+      let actualRate = normalizeExcelRate(row[idx.actualRate]);
+      const refillQtyNew = asNumber(row[idx.refillQtyNew]);
+      let refillRateNew = normalizeExcelRate(row[idx.refillRateNew]);
       const output = asNumber(row[idx.outputKg]);
       const price = asNumber(row[idx.price]);
       let prodRate = normalizeExcelRate(row[idx.outputRate]);
@@ -2081,6 +2101,15 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       let overuseRate = normalizeExcelRate(row[idx.overuseRate]);
       const overuseAmt = asNumber(row[idx.overuseAmt]);
 
+      if (!Number.isFinite(expandRate) && Number.isFinite(order) && order > 0 && Number.isFinite(expandQty)) {
+        expandRate = expandQty / order;
+      }
+      if (!Number.isFinite(actualRate) && Number.isFinite(order) && order > 0 && Number.isFinite(actualQty)) {
+        actualRate = actualQty / order;
+      }
+      if (!Number.isFinite(refillRateNew) && Number.isFinite(order) && order > 0 && Number.isFinite(refillQtyNew)) {
+        refillRateNew = refillQtyNew / order;
+      }
       if (!Number.isFinite(prodRate) && Number.isFinite(order) && order > 0 && Number.isFinite(output)) {
         prodRate = output / order;
       }
@@ -2101,6 +2130,12 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
         refill: null,
         price: Number.isFinite(price) ? price : null,
         unitPrice: Number.isFinite(price) ? price : null,
+        expandQty: Number.isFinite(expandQty) ? expandQty : null,
+        expandRate: Number.isFinite(expandRate) ? expandRate : null,
+        actualQty: Number.isFinite(actualQty) ? actualQty : null,
+        actualRate: Number.isFinite(actualRate) ? actualRate : null,
+        refillQtyNew: Number.isFinite(refillQtyNew) ? refillQtyNew : null,
+        refillRateNew: Number.isFinite(refillRateNew) ? refillRateNew : null,
         prodRate: Number.isFinite(prodRate) ? prodRate : null,
         diffQty: null,
         diffAmt: null,
@@ -3910,7 +3945,9 @@ function aggregateSelectedItemDaily(startISO, endISO){
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      expandQty: 0, actualQty: 0, refillQtyNew: 0,
       scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
+      expandRateNumer: 0, expandRateDenom: 0, actualRateNumer: 0, actualRateDenom: 0, refillRateNumer: 0, refillRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = m.get(r.date);
@@ -3924,6 +3961,9 @@ function aggregateSelectedItemDaily(startISO, endISO){
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    o.expandQty += Number(r.expandQty)||0;
+    o.actualQty += Number(r.actualQty)||0;
+    o.refillQtyNew += Number(r.refillQtyNew)||0;
     const __ord = Number(r.order);
     if (Number.isFinite(__ord) && __ord > 0) {
       const __sr = Number(r.scrapRate);
@@ -3932,6 +3972,12 @@ function aggregateSelectedItemDaily(startISO, endISO){
       if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
       const __pr = Number(r.prodRate);
       if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+      const __er = Number(r.expandRate);
+      if (Number.isFinite(__er)) { o.expandRateNumer += __er * __ord; o.expandRateDenom += __ord; }
+      const __ar = Number(r.actualRate);
+      if (Number.isFinite(__ar)) { o.actualRateNumer += __ar * __ord; o.actualRateDenom += __ord; }
+      const __rr = Number(r.refillRateNew);
+      if (Number.isFinite(__rr)) { o.refillRateNumer += __rr * __ord; o.refillRateDenom += __ord; }
     }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
@@ -3941,6 +3987,9 @@ function aggregateSelectedItemDaily(startISO, endISO){
     o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
     o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
     o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
+    o.expandRate = o.expandRateDenom > 0 ? (o.expandRateNumer / o.expandRateDenom) : (o.order>0 ? (o.expandQty / o.order) : null);
+    o.actualRate = o.actualRateDenom > 0 ? (o.actualRateNumer / o.actualRateDenom) : (o.order>0 ? (o.actualQty / o.order) : null);
+    o.refillRateNew = o.refillRateDenom > 0 ? (o.refillRateNumer / o.refillRateDenom) : (o.order>0 ? (o.refillQtyNew / o.order) : null);
   }
   return daily;
 }
@@ -3988,7 +4037,9 @@ function renderSelectedItem() {
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      expandQty: 0, actualQty: 0, refillQtyNew: 0,
       scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
+      expandRateNumer: 0, expandRateDenom: 0, actualRateNumer: 0, actualRateDenom: 0, refillRateNumer: 0, refillRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = m.get(r.date);
@@ -4002,6 +4053,9 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    o.expandQty += Number(r.expandQty)||0;
+    o.actualQty += Number(r.actualQty)||0;
+    o.refillQtyNew += Number(r.refillQtyNew)||0;
     const __ord = Number(r.order);
     if (Number.isFinite(__ord) && __ord > 0) {
       const __sr = Number(r.scrapRate);
@@ -4010,6 +4064,12 @@ function renderSelectedItem() {
       if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
       const __pr = Number(r.prodRate);
       if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+      const __er = Number(r.expandRate);
+      if (Number.isFinite(__er)) { o.expandRateNumer += __er * __ord; o.expandRateDenom += __ord; }
+      const __ar = Number(r.actualRate);
+      if (Number.isFinite(__ar)) { o.actualRateNumer += __ar * __ord; o.actualRateDenom += __ord; }
+      const __rr = Number(r.refillRateNew);
+      if (Number.isFinite(__rr)) { o.refillRateNumer += __rr * __ord; o.refillRateDenom += __ord; }
     }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
@@ -4019,6 +4079,9 @@ function renderSelectedItem() {
     o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
     o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
     o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
+    o.expandRate = o.expandRateDenom > 0 ? (o.expandRateNumer / o.expandRateDenom) : (o.order>0 ? (o.expandQty / o.order) : null);
+    o.actualRate = o.actualRateDenom > 0 ? (o.actualRateNumer / o.actualRateDenom) : (o.order>0 ? (o.actualQty / o.order) : null);
+    o.refillRateNew = o.refillRateDenom > 0 ? (o.refillRateNumer / o.refillRateDenom) : (o.order>0 ? (o.refillQtyNew / o.order) : null);
   }
   state.selectedChartDaily = daily;
 
@@ -4034,7 +4097,9 @@ function renderSelectedItem() {
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      expandQty: 0, actualQty: 0, refillQtyNew: 0,
       scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
+      expandRateNumer: 0, expandRateDenom: 0, actualRateNumer: 0, actualRateDenom: 0, refillRateNumer: 0, refillRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = mBase.get(r.date);
@@ -4048,6 +4113,9 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    o.expandQty += Number(r.expandQty)||0;
+    o.actualQty += Number(r.actualQty)||0;
+    o.refillQtyNew += Number(r.refillQtyNew)||0;
     const __ord = Number(r.order);
     if (Number.isFinite(__ord) && __ord > 0) {
       const __sr = Number(r.scrapRate);
@@ -4056,6 +4124,12 @@ function renderSelectedItem() {
       if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
       const __pr = Number(r.prodRate);
       if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+      const __er = Number(r.expandRate);
+      if (Number.isFinite(__er)) { o.expandRateNumer += __er * __ord; o.expandRateDenom += __ord; }
+      const __ar = Number(r.actualRate);
+      if (Number.isFinite(__ar)) { o.actualRateNumer += __ar * __ord; o.actualRateDenom += __ord; }
+      const __rr = Number(r.refillRateNew);
+      if (Number.isFinite(__rr)) { o.refillRateNumer += __rr * __ord; o.refillRateDenom += __ord; }
     }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
@@ -4065,6 +4139,9 @@ function renderSelectedItem() {
     o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
     o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
     o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
+    o.expandRate = o.expandRateDenom > 0 ? (o.expandRateNumer / o.expandRateDenom) : (o.order>0 ? (o.expandQty / o.order) : null);
+    o.actualRate = o.actualRateDenom > 0 ? (o.actualRateNumer / o.actualRateDenom) : (o.order>0 ? (o.actualQty / o.order) : null);
+    o.refillRateNew = o.refillRateDenom > 0 ? (o.refillRateNumer / o.refillRateDenom) : (o.order>0 ? (o.refillQtyNew / o.order) : null);
   }
 
 
@@ -4413,17 +4490,18 @@ function hasNewDetailLayout(rows){
 
 function buildDetailHeaderHTML(useNew, isRate){
   if (useNew) {
+    const expandMode = state.detailNewMetricMode === 'expandOutput';
     return `
       <th>日期</th>
       <th>商品名</th>
       <th>半成品名</th>
       <th class="text-right">單價</th>
       <th class="text-right">訂單需求</th>
-      <th id="detailOutputHeader" class="text-right">${isRate ? '總產出率' : '總產出(kg)'}</th>
-      <th id="detailScrapQtyHeader" class="text-right">${isRate ? '報廢率' : '報廢數(kg)'}</th>
-      <th class="text-right">報廢金額</th>
-      <th id="detailOveruseQtyHeader" class="text-right">${isRate ? '超用率' : '超用數(kg)'}</th>
-      <th class="text-right">超用金額</th>
+      <th id="detailOutputHeader" class="text-right">${expandMode ? (isRate ? '生管展開率(%)' : '生管展開量(kg)') : (isRate ? '總產出率' : '總產出(kg)')}</th>
+      <th id="detailScrapQtyHeader" class="text-right">${expandMode ? (isRate ? '生產實際產出(%)' : '生產實際產出量(kg)') : (isRate ? '報廢率' : '報廢數(kg)')}</th>
+      <th class="text-right">${expandMode ? (isRate ? '生產補單率(%)' : '生產補單量') : '報廢金額'}</th>
+      <th id="detailOveruseQtyHeader" class="text-right" style="${expandMode ? 'display:none;' : ''}">${isRate ? '超用率' : '超用數(kg)'}</th>
+      <th class="text-right" style="${expandMode ? 'display:none;' : ''}">超用金額</th>
     `;
   }
   return `
@@ -4479,6 +4557,13 @@ function syncDetailQtyRateHeaders(rows = state.selectedDaily){
     btn.textContent = isRate ? '切換為數量' : '切換為比率';
     btn.classList.toggle('active', isRate);
   }
+  const modeBtn = $('detailExpandOutputBtn');
+  if (modeBtn) {
+    modeBtn.style.display = useNew ? '' : 'none';
+    const expandMode = state.detailNewMetricMode === 'expandOutput';
+    modeBtn.textContent = expandMode ? '切換為報廢超用' : '切換為展開產出';
+    modeBtn.classList.toggle('active', expandMode);
+  }
 }
 
 function renderDetailTable(daily) {
@@ -4488,6 +4573,7 @@ function renderDetailTable(daily) {
   tbody.innerHTML = '';
   let lastPeriodLabel = null;
   const colspan = useNew ? 10 : 14;
+  const expandMode = useNew && state.detailNewMetricMode === 'expandOutput';
   for (const r of daily) {
     if (r._periodLabel && r._periodLabel !== lastPeriodLabel) {
       const divTr = document.createElement('tr');
@@ -4498,7 +4584,18 @@ function renderDetailTable(daily) {
     }
     const tr = document.createElement('tr');
     if (useNew) {
-      tr.innerHTML = `
+      tr.innerHTML = expandMode ? `
+        <td class="mono">${r.date}</td>
+        <td>${r.product}</td>
+        <td class="muted">${r.semi}</td>
+        <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
+        <td class="text-right mono">${fmtInt(r.order)}</td>
+        <td class="text-right mono">${fmtQtyRateByOrder(r.expandQty, r.order, r.expandRate)}</td>
+        <td class="text-right mono">${fmtQtyRateByOrder(r.actualQty, r.order, r.actualRate)}</td>
+        <td class="text-right mono">${fmtQtyRateByOrder(r.refillQtyNew, r.order, r.refillRateNew)}</td>
+        <td class="text-right mono" style="display:none;"></td>
+        <td class="text-right mono" style="display:none;"></td>
+      ` : `
         <td class="mono">${r.date}</td>
         <td>${r.product}</td>
         <td class="muted">${r.semi}</td>
@@ -4536,8 +4633,11 @@ function exportSelectedCsv() {
   if (!rows || !rows.length) return;
   const isRate = state.detailQtyMode === 'rate';
   const useNew = hasNewDetailLayout(rows);
+  const expandMode = useNew && state.detailNewMetricMode === 'expandOutput';
   const header = useNew
-    ? ['日期','商品名','半成品名','單價','訂單需求', isRate ? '總產出率' : '總產出(kg)', isRate ? '報廢率' : '報廢數(kg)','報廢金額', isRate ? '超用率' : '超用數(kg)','超用金額']
+    ? (expandMode
+        ? ['日期','商品名','半成品名','單價','訂單需求', isRate ? '生管展開率(%)' : '生管展開量(kg)', isRate ? '生產實際產出(%)' : '生產實際產出量(kg)', isRate ? '生產補單率(%)' : '生產補單量']
+        : ['日期','商品名','半成品名','單價','訂單需求', isRate ? '總產出率' : '總產出(kg)', isRate ? '報廢率' : '報廢數(kg)','報廢金額', isRate ? '超用率' : '超用數(kg)','超用金額'])
     : ['日期','商品名','半成品名','訂單需求','實際產出','補單','單價','實際生產率', isRate ? '差異率' : '差異量','差異金額', isRate ? '報廢率' : '報廢量','報廢金額', isRate ? '超用率' : '超用量','超用金額'];
   const lines = [header.join(',')];
 
@@ -4567,7 +4667,16 @@ function exportSelectedCsv() {
 
   for (const r of rows) {
     if (useNew) {
-      lines.push([
+      lines.push((expandMode ? [
+        r.date,
+        esc(r.product),
+        esc(r.semi),
+        r.price == null ? '' : r.price.toFixed(2),
+        r.order ?? '',
+        rateOrExplicit(r.expandQty, r.order, r.expandRate),
+        rateOrExplicit(r.actualQty, r.order, r.actualRate),
+        rateOrExplicit(r.refillQtyNew, r.order, r.refillRateNew)
+      ] : [
         r.date,
         esc(r.product),
         esc(r.semi),
@@ -4578,7 +4687,7 @@ function exportSelectedCsv() {
         r.scrapAmt ?? '',
         rateOrExplicit(r.overuseQty, r.order, r.overuseRate),
         r.overuseAmt ?? ''
-      ].join(','));
+      ]).join(','));
     } else {
       lines.push([
         r.date,
@@ -4769,6 +4878,15 @@ function wireUI() {
       renderDetailTable(state.selectedDaily || []);
     });
   }
+  const detailExpandOutputBtn = $('detailExpandOutputBtn');
+  if (detailExpandOutputBtn) {
+    detailExpandOutputBtn.addEventListener('click', () => {
+      state.detailNewMetricMode = (state.detailNewMetricMode === 'expandOutput') ? 'scrapOver' : 'expandOutput';
+      syncDetailQtyRateHeaders();
+      renderDetailTable(state.selectedDaily || []);
+    });
+  }
+
 
   const prevDetailExpandBtn = $('prevDetailExpandBtn');
   if (prevDetailExpandBtn) {
