@@ -2661,18 +2661,35 @@ function buildSelectors() {
       if (m && m.monthKey) yearSet.add(String(m.monthKey).slice(0,4));
     }
   }
+  // 只要 manifest 中任一該月份檔案存在，也要顯示年份 / 月份，
+  // 不能因為缺少 JFM 檔或該月份尚未實際載入 summary 而不顯示。
+  if (Array.isArray(state.manifestFiles)) {
+    for (const fp of state.manifestFiles) {
+      for (const mk of getFileMonthCoverage(fp)) {
+        if (!mk) continue;
+        yearSet.add(String(mk).slice(0,4));
+      }
+    }
+  }
   const years = Array.from(yearSet).sort();
   state.years = years;
   $('yearSel').innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-  // months by year（除了 summary 日別資料，也補入 JFM 週檔 / 月檔涵蓋的月份）
+  // months by year：除了 summary / JFM，也補入 manifest 內所有已存在檔案涵蓋月份
   const monthsByYear = new Map();
-  for (const r of state.summary) {
-    const y = r.date.slice(0,4);
-    const mm = r.date.slice(5,7);
+  const addMonthKey = (mk) => {
+    if (!mk) return;
+    const parts = String(mk).split('-');
+    if (parts.length !== 2) return;
+    const y = parts[0];
+    const mm = String(parts[1]).padStart(2, '0');
+    if (!/^20\d{2}$/.test(y) || !/^(0[1-9]|1[0-2])$/.test(mm)) return;
     if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
     monthsByYear.get(y).add(mm);
-  }
+  };
+
+  for (const r of state.summary) addMonthKey(String(r.date || '').slice(0,7));
+
   if (state.jfmIndex) {
     if (Array.isArray(state.jfmIndex.weeks)) {
       for (const w of state.jfmIndex.weeks) {
@@ -2680,10 +2697,7 @@ function buildSelectors() {
         const cur = new Date(String(w.startISO).slice(0,4), Number(String(w.startISO).slice(5,7)) - 1, 1);
         const endMonth = new Date(String(w.endISO).slice(0,4), Number(String(w.endISO).slice(5,7)) - 1, 1);
         while (cur <= endMonth) {
-          const y = String(cur.getFullYear());
-          const mm = String(cur.getMonth() + 1).padStart(2, '0');
-          if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
-          monthsByYear.get(y).add(mm);
+          addMonthKey(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
           cur.setMonth(cur.getMonth() + 1);
         }
       }
@@ -2691,13 +2705,17 @@ function buildSelectors() {
     if (Array.isArray(state.jfmIndex.months)) {
       for (const m of state.jfmIndex.months) {
         if (!m || !m.monthKey) continue;
-        const [y, mm] = String(m.monthKey).split('-');
-        if (!y || !mm) continue;
-        if (!monthsByYear.has(y)) monthsByYear.set(y, new Set());
-        monthsByYear.get(y).add(mm);
+        addMonthKey(m.monthKey);
       }
     }
   }
+
+  if (Array.isArray(state.manifestFiles)) {
+    for (const fp of state.manifestFiles) {
+      for (const mk of getFileMonthCoverage(fp)) addMonthKey(mk);
+    }
+  }
+
   state.monthsByYear = {};
   for (const [y, set] of monthsByYear.entries()) {
     state.monthsByYear[y] = Array.from(set).sort();
