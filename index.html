@@ -883,6 +883,16 @@ function asNumber(v){
   return isFinite(n) ? n : NaN;
 }
 
+function normalizeExcelRate(v){
+  const n = asNumber(v);
+  if (!Number.isFinite(n)) return NaN;
+  // Excel percent cells usually come as 0.0069; typed strings like "0.5%" become 0.5 after asNumber.
+  // Treat values larger than 1 as percentages, and values between 0.2~1 as likely "xx%" strings only when original text includes %.
+  const raw = (v == null) ? '' : String(v);
+  if (raw.includes('%')) return n / 100;
+  return n;
+}
+
 
 function initStickyControls(){
   const sentinel = document.getElementById('stickySentinel');
@@ -2063,12 +2073,12 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       const order = asNumber(row[idx.order]);
       const output = asNumber(row[idx.outputKg]);
       const price = asNumber(row[idx.price]);
-      let prodRate = asNumber(row[idx.outputRate]);
+      let prodRate = normalizeExcelRate(row[idx.outputRate]);
       const scrapQty = asNumber(row[idx.scrapQty]);
-      let scrapRate = asNumber(row[idx.scrapRate]);
+      let scrapRate = normalizeExcelRate(row[idx.scrapRate]);
       const scrapAmt = asNumber(row[idx.scrapAmt]);
       const overuseQty = asNumber(row[idx.overuseQty]);
-      let overuseRate = asNumber(row[idx.overuseRate]);
+      let overuseRate = normalizeExcelRate(row[idx.overuseRate]);
       const overuseAmt = asNumber(row[idx.overuseAmt]);
 
       if (!Number.isFinite(prodRate) && Number.isFinite(order) && order > 0 && Number.isFinite(output)) {
@@ -3632,7 +3642,41 @@ function fmtGroupMetricValue(row, key){
   return '—';
 }
 
+
+function isMay2026OrLaterRange(){
+  try{
+    const r = getDateRange();
+    const end = safeStr(r && r.end);
+    return !!end && end >= '2026-05-01';
+  }catch(e){
+    const end = safeStr(state?.selection?.end || state?.dateMax || '');
+    return !!end && end >= '2026-05-01';
+  }
+}
+
+function syncMayGroupColumnsAndSort(){
+  const isNew = isMay2026OrLaterRange();
+  state._hideGroupDiffColumns = isNew;
+
+  const sel = $('sortSel');
+  if (sel) {
+    const diffOptions = sel.querySelectorAll('option[value="diffAmt"], option[value="diffRate"]');
+    diffOptions.forEach(opt => {
+      opt.disabled = isNew;
+      opt.hidden = isNew;
+      opt.style.display = isNew ? 'none' : '';
+    });
+    if (isNew && (sel.value === 'diffAmt' || sel.value === 'diffRate')) {
+      sel.value = 'prodRate';
+    }
+  }
+
+  const h = $('groupDiffHeader');
+  if (h) h.style.display = isNew ? 'none' : '';
+}
+
 function syncGroupQtyRateHeaders(){
+  syncMayGroupColumnsAndSort();
   const isRate = state.groupQtyMode === 'rate';
   const map = [
     ['groupDiffHeader', isRate ? '差異率' : '差異金額'],
@@ -3674,6 +3718,7 @@ function applyGroupFilterAndRender(drows) {
     filtered = filtered.filter(r => r.semi.toLowerCase().includes(kwSemi));
   }
 
+  syncMayGroupColumnsAndSort();
   const sort = $('sortSel').value;
   const by = (k) => (a,b) => (Number(b[k])||0) - (Number(a[k])||0);
   const byNullable = (k) => (a,b) => {
@@ -3705,7 +3750,7 @@ function applyGroupFilterAndRender(drows) {
       <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
       <td class="text-right mono">${fmtInt(r.refillQty)}</td>
       <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
-      <td class="text-right mono">${fmtGroupMetricValue(r, 'diff')}</td>
+      ${state._hideGroupDiffColumns ? '' : `<td class="text-right mono">${fmtGroupMetricValue(r, 'diff')}</td>`}
       <td class="text-right mono">${fmtGroupMetricValue(r, 'scrap')}</td>
       <td class="text-right mono">${fmtGroupMetricValue(r, 'overuse')}</td>
     `;
@@ -3865,6 +3910,7 @@ function aggregateSelectedItemDaily(startISO, endISO){
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = m.get(r.date);
@@ -3878,12 +3924,23 @@ function aggregateSelectedItemDaily(startISO, endISO){
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    const __ord = Number(r.order);
+    if (Number.isFinite(__ord) && __ord > 0) {
+      const __sr = Number(r.scrapRate);
+      if (Number.isFinite(__sr)) { o.scrapRateNumer += __sr * __ord; o.scrapRateDenom += __ord; }
+      const __or = Number(r.overuseRate);
+      if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
+      const __pr = Number(r.prodRate);
+      if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+    }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
   const daily = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   for (const o of daily) {
     o.price = o.priceN ? (o.priceSum / o.priceN) : null;
-    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
+    o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
+    o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
   }
   return daily;
 }
@@ -3931,6 +3988,7 @@ function renderSelectedItem() {
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = m.get(r.date);
@@ -3944,12 +4002,23 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    const __ord = Number(r.order);
+    if (Number.isFinite(__ord) && __ord > 0) {
+      const __sr = Number(r.scrapRate);
+      if (Number.isFinite(__sr)) { o.scrapRateNumer += __sr * __ord; o.scrapRateDenom += __ord; }
+      const __or = Number(r.overuseRate);
+      if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
+      const __pr = Number(r.prodRate);
+      if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+    }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
   const daily = Array.from(m.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   for (const o of daily) {
     o.price = o.priceN ? (o.priceSum / o.priceN) : null;
-    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
+    o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
+    o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
   }
   state.selectedChartDaily = daily;
 
@@ -3965,6 +4034,7 @@ function renderSelectedItem() {
       diffQty: 0, diffAmt: 0,
       scrapQty: 0, scrapAmt: 0,
       overuseQty: 0, overuseAmt: 0,
+      scrapRateNumer: 0, scrapRateDenom: 0, overuseRateNumer: 0, overuseRateDenom: 0, outputRateNumer: 0, outputRateDenom: 0,
       _detailFormat: r._detailFormat || 'old'
     });
     const o = mBase.get(r.date);
@@ -3978,12 +4048,23 @@ function renderSelectedItem() {
     o.scrapAmt += Number(r.scrapAmt)||0;
     o.overuseQty += Number(r.overuseQty)||0;
     o.overuseAmt += Number(r.overuseAmt)||0;
+    const __ord = Number(r.order);
+    if (Number.isFinite(__ord) && __ord > 0) {
+      const __sr = Number(r.scrapRate);
+      if (Number.isFinite(__sr)) { o.scrapRateNumer += __sr * __ord; o.scrapRateDenom += __ord; }
+      const __or = Number(r.overuseRate);
+      if (Number.isFinite(__or)) { o.overuseRateNumer += __or * __ord; o.overuseRateDenom += __ord; }
+      const __pr = Number(r.prodRate);
+      if (Number.isFinite(__pr)) { o.outputRateNumer += __pr * __ord; o.outputRateDenom += __ord; }
+    }
     if (r._detailFormat === 'new') o._detailFormat = 'new';
   }
   const dailyBase = Array.from(mBase.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
   for (const o of dailyBase) {
     o.price = o.priceN ? (o.priceSum / o.priceN) : null;
-    o.prodRate = o.order>0 ? (o.output / o.order) : null;
+    o.prodRate = o.outputRateDenom > 0 ? (o.outputRateNumer / o.outputRateDenom) : (o.order>0 ? (o.output / o.order) : null);
+    o.scrapRate = o.scrapRateDenom > 0 ? (o.scrapRateNumer / o.scrapRateDenom) : (o.order>0 ? (o.scrapQty / o.order) : null);
+    o.overuseRate = o.overuseRateDenom > 0 ? (o.overuseRateNumer / o.overuseRateDenom) : (o.order>0 ? (o.overuseQty / o.order) : null);
   }
 
 
