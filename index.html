@@ -4502,6 +4502,7 @@ function buildDetailHeaderHTML(useNew, isRate){
       <th class="text-right">${expandMode ? (isRate ? '生產補單率(%)' : '生產補單量') : '報廢金額'}</th>
       <th id="detailOveruseQtyHeader" class="text-right" style="${expandMode ? 'display:none;' : ''}">${isRate ? '超用率' : '超用數(kg)'}</th>
       <th class="text-right" style="${expandMode ? 'display:none;' : ''}">超用金額</th>
+      <th class="text-right" style="${expandMode ? '' : 'display:none;'}">${expandMode ? (isRate ? '總產出率(%)' : '總產出(kg)') : ''}</th>
     `;
   }
   return `
@@ -4572,7 +4573,7 @@ function renderDetailTable(daily) {
   const tbody = $('detailTbody');
   tbody.innerHTML = '';
   let lastPeriodLabel = null;
-  const colspan = useNew ? 10 : 14;
+  const colspan = useNew ? 11 : 14;
   const expandMode = useNew && state.detailNewMetricMode === 'expandOutput';
   for (const r of daily) {
     if (r._periodLabel && r._periodLabel !== lastPeriodLabel) {
@@ -4595,6 +4596,7 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtQtyRateByOrder(r.refillQtyNew, r.order, r.refillRateNew)}</td>
         <td class="text-right mono" style="display:none;"></td>
         <td class="text-right mono" style="display:none;"></td>
+        <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
       ` : `
         <td class="mono">${r.date}</td>
         <td>${r.product}</td>
@@ -4606,6 +4608,7 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.overuseQty, r.order, r.overuseRate)}</td>
         <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+        <td class="text-right mono" style="display:none;"></td>
       `;
     } else {
       tr.innerHTML = `
@@ -4623,6 +4626,7 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.overuseQty, r.order, r.overuseRate)}</td>
         <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+        <td class="text-right mono" style="display:none;"></td>
       `;
     }
     tbody.appendChild(tr);
@@ -4636,7 +4640,7 @@ function exportSelectedCsv() {
   const expandMode = useNew && state.detailNewMetricMode === 'expandOutput';
   const header = useNew
     ? (expandMode
-        ? ['日期','商品名','半成品名','單價','訂單需求', isRate ? '生管展開率(%)' : '生管展開量(kg)', isRate ? '生產實際產出(%)' : '生產實際產出量(kg)', isRate ? '生產補單率(%)' : '生產補單量']
+        ? ['日期','商品名','半成品名','單價','訂單需求', isRate ? '生管展開率(%)' : '生管展開量(kg)', isRate ? '生產實際產出(%)' : '生產實際產出量(kg)', isRate ? '生產補單率(%)' : '生產補單量', isRate ? '總產出率(%)' : '總產出(kg)']
         : ['日期','商品名','半成品名','單價','訂單需求', isRate ? '總產出率' : '總產出(kg)', isRate ? '報廢率' : '報廢數(kg)','報廢金額', isRate ? '超用率' : '超用數(kg)','超用金額'])
     : ['日期','商品名','半成品名','訂單需求','實際產出','補單','單價','實際生產率', isRate ? '差異率' : '差異量','差異金額', isRate ? '報廢率' : '報廢量','報廢金額', isRate ? '超用率' : '超用量','超用金額'];
   const lines = [header.join(',')];
@@ -4675,7 +4679,8 @@ function exportSelectedCsv() {
         r.order ?? '',
         rateOrExplicit(r.expandQty, r.order, r.expandRate),
         rateOrExplicit(r.actualQty, r.order, r.actualRate),
-        rateOrExplicit(r.refillQtyNew, r.order, r.refillRateNew)
+        rateOrExplicit(r.refillQtyNew, r.order, r.refillRateNew),
+        outputCsv(r)
       ] : [
         r.date,
         esc(r.product),
