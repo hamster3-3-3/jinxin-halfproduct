@@ -1260,7 +1260,7 @@ function isJfmFile(p){
 }
 function isWasteFile(p){
   const n = baseName(p);
-  return /晉欣半成品報廢管理表\.xlsx$/i.test(n);
+  return /(晉欣半成品報廢管理表|鮮食廠[_－-]?半成品生產管理日報).*\.xlsx$/i.test(n);
 }
 
 function toMMDD(d){
@@ -1276,11 +1276,18 @@ function weekKeyFromISO(startISO, endISO){
 }
 
 
+function matchWasteFileSpan(fileName){
+  const s = String(fileName || '');
+  return s.match(/(20\d{2})-(\d{2})(\d{2})-(\d{2})(\d{2})/i)
+      || s.match(/(20\d{2})(\d{2})(\d{2})-(\d{2})(\d{2})/i);
+}
+
 
 function parseWasteWeekFromName(filePath){
   const n = baseName(filePath);
   // e.g. 2026-0310-0316晉欣半成品報廢管理表.xlsx
-  const m = n.match(/(20\d{2})-(\d{2})(\d{2})-(\d{2})(\d{2})/i);
+  // or   鮮食廠_半成品生產管理日報_20260501-0503.xlsx
+  const m = matchWasteFileSpan(n);
   if (!m) return null;
   const y = Number(m[1]);
   const sm = Number(m[2]), sd = Number(m[3]);
@@ -1459,7 +1466,7 @@ function findSheetName(wb, keyword){
 // Parse file start date from filename like "2025-1101-1131晉欣半成品報廢管理表.xlsx"
 function parseFileStartFromName(fileName) {
   if (!fileName) return null;
-  const m = String(fileName).match(/(\d{4})-(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  const m = matchWasteFileSpan(fileName);
   if (!m) return null;
   const y = Number(m[1]);
   const mm = Number(m[2]);
@@ -1470,7 +1477,7 @@ function parseFileStartFromName(fileName) {
 
 function parseFileSpanFromName(fileName) {
   if (!fileName) return null;
-  const m = String(fileName).match(/(\d{4})-(\d{2})(\d{2})-(\d{2})(\d{2})/);
+  const m = matchWasteFileSpan(fileName);
   if (!m) return null;
   const y = Number(m[1]);
   const sm = Number(m[2]), sd = Number(m[3]);
@@ -1502,7 +1509,7 @@ function parseSummaryFromWB(wb, fileName) {
   const sname = wb.SheetNames.find(n => n.replace(/\s+/g,'').includes('日別報廢率總表')) || null;
   if (!sname) return [];
   const ws = wb.Sheets[sname];
-  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
   if (!rows || !rows.length) return [];
 
   // 找到 header row：包含「日期」
@@ -2998,6 +3005,105 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
   return { labels, values, keys };
 }
 
+
+function buildDerivedDailyMetricsFromDetails(drows){
+  const dayMap = new Map();
+  const groupMap = new Map();
+
+  for (const r of (drows || [])){
+    const date = safeStr(r && r.date).trim();
+    if (!date) continue;
+
+    if (!dayMap.has(date)) {
+      dayMap.set(date, {
+        date,
+        scrapAmt: 0,
+        overuseAmt: 0,
+        sharedAmt: 0,
+        topScrapAmt: 0,
+        topOverAmt: 0,
+        topScrapShare: 0,
+        topOverShare: 0,
+        sharedShare: 0
+      });
+      groupMap.set(date, new Map());
+    }
+
+    const day = dayMap.get(date);
+    const groups = groupMap.get(date);
+
+    const scrapAmt = Number(r && r.scrapAmt) || 0;
+    const overuseAmt = Number(r && r.overuseAmt) || 0;
+    day.scrapAmt += scrapAmt;
+    day.overuseAmt += overuseAmt;
+
+    if (safeStr(r && r.product).trim() === '共用類') {
+      day.sharedAmt += scrapAmt;
+    }
+
+    const gKey = safeStr(r && r.product).trim() + '||' + safeStr(r && r.semi).trim();
+    if (!groups.has(gKey)) groups.set(gKey, { scrapAmt: 0, overuseAmt: 0 });
+    const g = groups.get(gKey);
+    g.scrapAmt += scrapAmt;
+    g.overuseAmt += overuseAmt;
+  }
+
+  for (const [date, day] of dayMap.entries()){
+    const groups = Array.from((groupMap.get(date) || new Map()).values());
+    const topScrapAmt = groups
+      .map(g => Number(g.scrapAmt) || 0)
+      .sort((a,b) => b - a)
+      .slice(0, 10)
+      .reduce((a,b) => a + b, 0);
+    const topOverAmt = groups
+      .map(g => Number(g.overuseAmt) || 0)
+      .sort((a,b) => b - a)
+      .slice(0, 10)
+      .reduce((a,b) => a + b, 0);
+
+    day.topScrapAmt = topScrapAmt;
+    day.topOverAmt = topOverAmt;
+    day.topScrapShare = day.scrapAmt > 0 ? (topScrapAmt / day.scrapAmt) : 0;
+    day.topOverShare = day.overuseAmt > 0 ? (topOverAmt / day.overuseAmt) : 0;
+    day.sharedShare = day.scrapAmt > 0 ? (day.sharedAmt / day.scrapAmt) : 0;
+  }
+
+  return dayMap;
+}
+
+function augmentSummaryRowsWithDetails(srows, drows){
+  const merged = new Map();
+
+  for (const r of (srows || [])){
+    if (!r || !r.date) continue;
+    merged.set(r.date, Object.assign({}, r));
+  }
+
+  const derived = buildDerivedDailyMetricsFromDetails(drows);
+  for (const [date, day] of derived.entries()){
+    const base = merged.get(date) || { date, sales: 0, scrapAmt: 0, overuseAmt: 0 };
+    if (!Number.isFinite(Number(base.scrapAmt)) || Number(base.scrapAmt) === 0) base.scrapAmt = day.scrapAmt;
+    if (!Number.isFinite(Number(base.overuseAmt)) || Number(base.overuseAmt) === 0) base.overuseAmt = day.overuseAmt;
+
+    base.topScrapAmt = day.topScrapAmt;
+    base.topScrapShare = day.topScrapShare;
+    base.topOverAmt = day.topOverAmt;
+    base.topOverShare = day.topOverShare;
+    base.sharedAmt = day.sharedAmt;
+    base.sharedShare = day.sharedShare;
+
+    const sales = Number(base.sales) || 0;
+    if (sales > 0){
+      base.scrapRate = (Number(base.scrapAmt) || 0) / sales;
+      base.overuseRate = (Number(base.overuseAmt) || 0) / sales;
+    }
+
+    merged.set(date, base);
+  }
+
+  return Array.from(merged.values()).sort((a,b) => safeLocaleCompare(a.date, b.date));
+}
+
 function updateKPICards(srows) {
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
 
@@ -3548,29 +3654,32 @@ function getSelectedRangeRows() {
     drowsChart = filterByRange(state.details, ex.start, ex.end);
   }
 
-  return {start, end, srows, drows, srowsChart, drowsChart};
+  const augSummary = augmentSummaryRowsWithDetails(srows, drows);
+  const augSummaryChart = augmentSummaryRowsWithDetails(srowsChart, drowsChart);
+
+  return {start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart};
 }
 
 function renderAll() {
-  const { start, end, srows, drows, srowsChart, drowsChart } = getSelectedRangeRows();
-  state.view = { start, end, srows, drows, srowsChart, drowsChart };
+  const { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart } = getSelectedRangeRows();
+  state.view = { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart };
 
-  updateKPICards(srows);
+  updateKPICards(augSummary);
   renderReasonCards(start, end);
   bindReasonCardClicks();
-  renderKPIChart(srowsChart, start, end);
-  renderRightChart(srowsChart, start, end);
+  renderKPIChart(augSummaryChart, start, end);
+  renderRightChart(augSummaryChart, start, end);
   applyGroupFilterAndRender(drowsChart);
 }
 
 function renderKPIOnly() {
   if (!state.view) return renderAll();
-  renderKPIChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
+  renderKPIChart(state.view.augSummaryChart || state.view.srowsChart || state.view.augSummary || state.view.srows, state.view.start, state.view.end);
 }
 
 function renderRightOnly() {
   if (!state.view) return renderAll();
-  renderRightChart(state.view.srowsChart || state.view.srows, state.view.start, state.view.end);
+  renderRightChart(state.view.augSummaryChart || state.view.srowsChart || state.view.augSummary || state.view.srows, state.view.start, state.view.end);
 }
 
 
