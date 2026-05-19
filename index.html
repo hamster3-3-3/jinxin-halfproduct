@@ -1270,7 +1270,8 @@ function baseName(p){ return String(p || '').split('/').pop(); }
 
 function isJfmFile(p){
   const n = baseName(p);
-  return /[【〖]JFM指導[】〗]/.test(n) && /生產管理報表/.test(n) && /\.xlsx$/i.test(n);
+  // JFM 檔名有時不會帶「【JFM指導】」，但只要是「生產管理報表」且不是半成品日報/報廢表，就需要載入原因別分析(7-1)。
+  return /生產管理報表/.test(n) && /\.xlsx$/i.test(n) && !/(半成品|報廢管理|生產日報|點檢|檢測)/.test(n);
 }
 function isWasteFile(p){
   const n = baseName(p);
@@ -2364,7 +2365,7 @@ function findReasonSheetName(wb){
   for (const n of wb.SheetNames) {
     try{
       const ws = wb.Sheets[n];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, range:50});
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
       for (let r=0;r<Math.min(rows.length,50);r++){
         const row = rows[r]||[];
         for (let c=0;c<Math.min(row.length,30);c++){
@@ -2416,30 +2417,121 @@ function parseReasonFromWB(wb, fileName){
   }
 
   function parseRangeFromTitle(title){
-    const m = title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})\)/)
-           || title.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\)/);
+    // 週別原因區塊有時標題只有「原因別分析」，日期只存在於檔名；
+    // 月檔也可能只有 YYYY.MM。這裡同時從標題與檔名推回 rangeKey / monthKey，避免原因卡片全為 0。
+    const titleText = normTitle(title);
+    const fileText = normTitle(fileName);
+    const text = titleText + '|' + fileText;
     let startISO = null, endISO = null, rangeKey = null, monthKey = null, year = fileYear;
-    if (m && fileYear){
-      let m1, d1, m2, d2;
-      if (m.length >= 5 && m[4] != null){
-        m1 = Number(m[1]); d1 = Number(m[2]); m2 = Number(m[3]); d2 = Number(m[4]);
-      } else {
-        m1 = Number(m[1]); d1 = Number(m[2]); m2 = m1; d2 = Number(m[3]);
-      }
-      let y1 = fileYear, y2 = fileYear;
-      if (m1 === 12 && m2 === 1) y2 = fileYear + 1;
-      if (m1 === 1 && m2 === 12) y1 = fileYear - 1;
+
+    const mmdd = (iso) => {
+      const d = parseISO(iso);
+      if (!(d instanceof Date) || isNaN(d)) return '';
+      return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    };
+    const setRange = (baseYear, m1, d1, m2, d2) => {
+      let y1 = Number(baseYear), y2 = Number(baseYear);
+      m1 = Number(m1); d1 = Number(d1); m2 = Number(m2); d2 = Number(d2);
+      if (!y1 || !m1 || !d1 || !m2 || !d2) return false;
+      if (m1 === 12 && m2 === 1) y2 = y1 + 1;
+      if (m1 === 1 && m2 === 12) y1 = y1 - 1;
       startISO = toISO(new Date(y1, m1-1, d1));
       endISO   = toISO(new Date(y2, m2-1, d2));
-      const mmdd = (iso) => {
-        const d = parseISO(iso);
-        return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
-      };
       rangeKey = mmdd(startISO) + '-' + mmdd(endISO);
       monthKey = endISO ? String(endISO).slice(0,7) : null;
-      year = startISO ? String(startISO).slice(0,4) : fileYear;
+      year = String(startISO).slice(0,4);
+      return true;
+    };
+
+    // A. 標題內日期：原因別分析(5/1-5/3)、原因別分析(5/1-3)
+    let m = text.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})\)/)
+         || text.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\)/);
+    if (m && fileYear){
+      if (m.length >= 5 && m[4] != null) setRange(fileYear, m[1], m[2], m[3], m[4]);
+      else setRange(fileYear, m[1], m[2], m[1], m[3]);
     }
+
+    // B. 檔名內週別：生產管理報表2026.0501-0503
+    if (!rangeKey){
+      m = fileText.match(/(20\d{2})[.\-_/]?(\d{2})(\d{2})-(\d{2})(\d{2})/);
+      if (m) setRange(m[1], m[2], m[3], m[4], m[5]);
+    }
+
+    // C. 檔名或路徑內月別：生產管理報表2026.05、2026/05/...
+    if (!monthKey){
+      m = fileText.match(/生產管理報表(20\d{2})\.(\d{1,2})(?!\d)/)
+       || fileText.match(/(20\d{2})\/(\d{1,2})\//)
+       || fileText.match(/(20\d{2})[.\-_/](\d{1,2})(?!\d)/);
+      if (m){
+        const yy = Number(m[1]);
+        const mo = Number(m[2]);
+        if (yy && mo >= 1 && mo <= 12){
+          monthKey = `${yy}-${String(mo).padStart(2,'0')}`;
+          year = String(yy);
+        }
+      }
+    }
+
     return { startISO, endISO, rangeKey, monthKey, year };
+  }
+
+  function findNearestReasonInfo(rowIndex){
+    for (let r=rowIndex; r>=0 && r>=rowIndex-12; r--){
+      const txt = (rows[r]||[]).map(normTitle).filter(Boolean).join('|');
+      if (txt.includes('原因別分析')) return parseRangeFromTitle(txt);
+    }
+    return parseRangeFromTitle('');
+  }
+
+  function reasonLabelFromCell(v){
+    const k = normalizeReasonKey(v);
+    const def = REASON_DEFS.find(d => d.key === k);
+    return def ? def.label : null;
+  }
+
+  function findNearbyAmount(reasonRow, reasonCol, kind){
+    const kw = kind === 'scrap' ? '報廢' : '超用';
+    const colPriority = [reasonCol, reasonCol+1, reasonCol-1, reasonCol+2, reasonCol-2].filter(c => c >= 0);
+    for (let r=reasonRow; r<Math.min(rows.length, reasonRow+10); r++){
+      const row = rows[r] || [];
+      const rowText = row.map(normCell).join('|');
+      if (!rowText.includes(kw)) continue;
+      for (const c of colPriority){
+        const n = asNumber(row[c]);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return 0;
+  }
+
+  function parseReasonDynamicRows(){
+    const dyn = [];
+    const seenDyn = new Set();
+    for (let r=0; r<rows.length; r++){
+      const row = rows[r] || [];
+      for (let c=0; c<row.length; c++){
+        const label = reasonLabelFromCell(row[c]);
+        if (!label) continue;
+        const info = findNearestReasonInfo(r);
+        const rec = {
+          start: info.startISO,
+          end: info.endISO,
+          rangeKey: info.rangeKey,
+          monthKey: info.monthKey,
+          year: String(info.year||fileYear||''),
+          reason: label,
+          scrapAmt: findNearbyAmount(r, c, 'scrap'),
+          overuseAmt: findNearbyAmount(r, c, 'over'),
+          source: safeStr(fileName)
+        };
+        const k = [rec.start, rec.end, rec.rangeKey, rec.monthKey, rec.reason, rec.source].join('|');
+        if (!seenDyn.has(k)){
+          seenDyn.add(k);
+          dyn.push(rec);
+        }
+      }
+    }
+    return dyn;
   }
 
   const cols = [5,7,9,11]; // F,H,J,L
@@ -2453,7 +2545,7 @@ function parseReasonFromWB(wb, fileName){
     const row = rows[r] || [];
     for(let c=0; c<row.length; c++){
       const title = normTitle(row[c]);
-      if (title.includes('原因別分析(') || title.includes('原因別分析（') || title.includes('原因別分析(')) {
+      if (title.includes('原因別分析')) {
         titleRows.push({ rowIndex: r, title });
         break;
       }
@@ -2528,6 +2620,10 @@ function parseReasonFromWB(wb, fileName){
     }
   }
 
+  const fixedTotal = out.reduce((a,b)=>a+(Number(b.scrapAmt)||0)+(Number(b.overuseAmt)||0),0);
+  const dyn = parseReasonDynamicRows();
+  const dynTotal = dyn.reduce((a,b)=>a+(Number(b.scrapAmt)||0)+(Number(b.overuseAmt)||0),0);
+  if (dyn.length && (fixedTotal === 0 || dynTotal > fixedTotal)) return dyn;
   return out;
 }
 
@@ -3393,6 +3489,10 @@ function renderReasonCards(rangeStartISO, rangeEndISO){
       if (rangeKey) picked = entries.filter(r => r.rangeKey === rangeKey || (r.start === selStart && r.end === selEnd));
       if (!picked.length && monthKey) picked = entries.filter(r => r.monthKey === monthKey || rangeKeyTouchesMonth(r.rangeKey, monthKey));
     }
+
+    // 若來源檔已被 activeJfmSources 篩到，但解析不到 rangeKey/monthKey（常見於 7-1 標題無日期），
+    // 直接採用該來源檔內的原因別資料，避免畫面全部顯示 0。
+    if (!picked.length && actSrc.length) picked = entries;
 
     const mapReasonToKey = (txt) => {
       const t = safeStr(txt).trim();
@@ -5238,11 +5338,13 @@ function renderTop20Expand(){
   const act = Array.isArray(st.activeSources) ? st.activeSources : [];
   if (act.length) rows = rows.filter(r => act.includes(r.source));
 
+  const rowsBeforePeriodFilter = rows.slice();
   if (rangeKey){
     rows = rows.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
-} else if (monthKey){
+  } else if (monthKey){
     rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
+  if (!rows.length && act.length) rows = rowsBeforePeriodFilter;
 
   const scopeMonthKey = (state.selection && state.selection.year && state.selection.month) ? `${state.selection.year}-${String(state.selection.month).padStart(2,'0')}` : null;
   const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO, scopeMonthKey);
