@@ -3884,6 +3884,13 @@ function getMayGroupColumns(sortValue){
   ];
 }
 
+function getMayGroupSourceColumn(sortValue){
+  const sort = sortValue || ($('sortSel') ? $('sortSel').value : 'prodRate');
+  if (sort === 'prodRate') return { label:'差異來自', type:'source' };
+  if (['scrapAmt','scrapRate','overuseAmt','overuseRate'].includes(sort)) return { label:'超用來自', type:'source' };
+  return null;
+}
+
 function fmtMayGroupCell(row, col){
   const v = row[col.field];
   if (col.type === 'rate') return v == null ? '—' : fmtPct(v);
@@ -3895,12 +3902,14 @@ function buildGroupHeaderHTML(){
   const isNew = isMay2026OrLaterRange();
   if (isNew) {
     const cols = getMayGroupColumns();
+    const sourceCol = getMayGroupSourceColumn();
     return `
       <th>商品名</th>
       <th>半成品名</th>
       <th>上市日期</th>
       <th class="text-right">單價</th>
       ${cols.map(c => `<th class="text-right">${c.label}</th>`).join('')}
+      ${sourceCol ? `<th class="whitespace-nowrap">${sourceCol.label}</th>` : ''}
     `;
   }
   const isRate = state.groupQtyMode === 'rate';
@@ -4017,6 +4026,7 @@ function applyGroupFilterAndRender(drows) {
   const tbody = $('groupTbody');
   tbody.innerHTML = '';
   const mayCols = isNewLayout ? getMayGroupColumns(sort) : [];
+  const groupSourceCol = isNewLayout ? getMayGroupSourceColumn(sort) : null;
   for (const r of state.filteredGroups) {
     const tr = document.createElement('tr');
     tr.className = 'cursor-pointer';
@@ -4027,6 +4037,7 @@ function applyGroupFilterAndRender(drows) {
         <td class="mono">${getLaunchCellHTML(r.product)}</td>
         <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
         ${mayCols.map(c => `<td class="text-right mono">${fmtMayGroupCell(r, c)}</td>`).join('')}
+        ${groupSourceCol ? `<td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>` : ''}
       `;
     } else {
       tr.innerHTML = `
