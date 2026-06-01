@@ -682,6 +682,7 @@ function monthKeyFromISO(iso){
               <option value="overuseAmt">超用金額（高→低）</option>
               <option value="overuseRate">超用率（高→低）</option>
               <option value="refillQty">補單量（高→低）</option>
+              <option value="refillRate">補單率（高→低）</option>
             </select>
           </div>
         </div>
@@ -3869,7 +3870,7 @@ function getMayGroupColumns(sortValue){
       { label:'超用金額', field:'overuseAmt', type:'money' }
     ];
   }
-  if (sort === 'refillQty') {
+  if (sort === 'refillQty' || sort === 'refillRate') {
     return [
       { label:'生產補單量', field:'refillQtyNew', type:'qty' },
       { label:'生產補單率', field:'refillRateNew', type:'rate' },
@@ -3940,7 +3941,7 @@ function syncMayGroupColumnsAndSort(){
       opt.style.display = isNew ? 'none' : '';
     });
 
-    const newOptions = sel.querySelectorAll('option[value="expandRate"], option[value="actualRate"]');
+    const newOptions = sel.querySelectorAll('option[value="expandRate"], option[value="actualRate"], option[value="refillRate"]');
     newOptions.forEach(opt => {
       opt.disabled = !isNew;
       opt.hidden = !isNew;
@@ -3953,7 +3954,7 @@ function syncMayGroupColumnsAndSort(){
     if (isNew && (sel.value === 'diffAmt' || sel.value === 'diffRate')) {
       sel.value = 'prodRate';
     }
-    if (!isNew && (sel.value === 'expandRate' || sel.value === 'actualRate')) {
+    if (!isNew && (sel.value === 'expandRate' || sel.value === 'actualRate' || sel.value === 'refillRate')) {
       sel.value = 'prodRate';
     }
   }
@@ -4019,6 +4020,7 @@ function applyGroupFilterAndRender(drows) {
   if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
   if (sort === 'overuseRate') filtered.sort(byNullable('overuseRate'));
   if (sort === 'refillQty') filtered.sort(isNewLayout ? by('refillQtyNew') : by('refillQty'));
+  if (sort === 'refillRate') filtered.sort(byNullable('refillRateNew'));
 
   state.filteredGroups = filtered.slice(0,200);
   $('groupCount').textContent = state.filteredGroups.length.toLocaleString('zh-TW');
