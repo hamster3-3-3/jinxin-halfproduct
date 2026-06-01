@@ -747,6 +747,7 @@ function monthKeyFromISO(iso){
                 <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
                 <button class="seg-btn" type="button" data-item-single="overuseRate">超用率</button>
                 <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
+                <button class="seg-btn" type="button" data-item-single="refillRateNew">補單率</button>
                 <button class="seg-btn" type="button" id="itemOrderOverlayBtn">訂單需求(副Y軸)</button>
               </div>
             </div>
@@ -4530,6 +4531,16 @@ function renderItemChart(daily) {
       get: (r) => r.refill,
       fmt: (v) => fmtInt(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    refillRateNew: {
+      label: '補單率',
+      kind: 'rate',
+      unitTitle: '%',
+      get: (r) => r.refillRateNew,
+      qtyField: 'refillQtyNew',
+      orderField: 'order',
+      fmt: (v) => fmtPct(v),
+      tick: (v) => (Number(v) * 100).toFixed(1) + '%'
     },
     orderQty: {
       label: '訂單需求',
