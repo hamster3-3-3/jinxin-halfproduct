@@ -561,7 +561,64 @@ function monthKeyFromISO(iso){
       </div>
     </div>
 
-    
+
+    <!-- New product / Top5 overuse-scrap panels -->
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3" id="newTopPanels">
+      <div class="card p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <div class="text-sm font-semibold">新品超用報廢</div>
+            <div id="prevNewProductSubtitle" class="text-xs muted mt-1">—</div>
+          </div>
+        </div>
+        <div class="overflow-auto max-h-[280px] table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>商品名</th>
+                <th>半成品名</th>
+                <th class="text-right">超用率</th>
+                <th class="text-right">報廢率</th>
+                <th class="text-right">超用金額</th>
+                <th class="text-right">報廢金額</th>
+              </tr>
+            </thead>
+            <tbody id="prevNewProductTbody"></tbody>
+          </table>
+        </div>
+        <div id="prevNewProductEmpty" class="hidden text-sm muted py-4">此條件下無前段新品資料。</div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <div class="text-sm font-semibold">前5大超用報廢</div>
+            <div id="top5ProductSubtitle" class="text-xs muted mt-1">依目前選擇時間範圍彙總</div>
+          </div>
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+            <button id="top5ScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+            <button id="top5OverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          </div>
+        </div>
+        <div class="overflow-auto max-h-[280px] table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>商品名</th>
+                <th>半成品名</th>
+                <th class="text-right">超用率</th>
+                <th class="text-right">報廢率</th>
+                <th class="text-right">超用金額</th>
+                <th class="text-right">報廢金額</th>
+              </tr>
+            </thead>
+            <tbody id="top5ProductTbody"></tbody>
+          </table>
+        </div>
+        <div id="top5ProductEmpty" class="hidden text-sm muted py-4">此條件下無前5大資料。</div>
+      </div>
+    </div>
+
 
     <!-- 原因別分析 cards -->
     <div class="mt-4">
@@ -1135,12 +1192,6 @@ function getProductNameHTML(productName){
   const cls = getLaunchHighlightClass(productName);
   const safe = escapeHTML(productName || '—');
   return cls ? `<span class="${cls}">${safe}</span>` : safe;
-}
-
-function getTop20ProductButtonHTML(productName, semiName){
-  const cls = getLaunchHighlightClass(productName);
-  const linkCls = cls ? 'js-jump hover:underline' : 'js-jump text-sky-700 hover:underline';
-  return `<button type="button" class="${linkCls}" data-prod="${escapeHTML(productName || '')}" data-semi="${escapeHTML(semiName || '')}">${getProductNameHTML(productName)}</button>`;
 }
 
 // Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
@@ -1916,7 +1967,7 @@ function renderTop20Modal(){
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap">${getProductNameHTML(fixedPair.product)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.product || '—')}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.semi || '—')}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
@@ -3464,6 +3515,86 @@ function computeBounds(values, kind) {
   return { min: mn, max: mx };
 }
 
+
+function getTopPanelRowsFromDetails(drows){
+  return aggregateGroups(drows || []).filter(r => {
+    return (Number(r.scrapAmt)||0) > 0 || (Number(r.overuseAmt)||0) > 0 || (Number(r.scrapQty)||0) > 0 || (Number(r.overuseQty)||0) > 0;
+  });
+}
+
+function renderMetricProductRows(tbodyId, emptyId, rows){
+  const tbody = $(tbodyId);
+  const empty = $(emptyId);
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!rows || !rows.length){
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-slate-50';
+    tr.innerHTML = `
+      <td class="whitespace-nowrap">${getProductNameHTML(r.product)}</td>
+      <td class="muted whitespace-nowrap">${escapeHTML(r.semi || '—')}</td>
+      <td class="text-right mono whitespace-nowrap">${r.overuseRate==null?'—':fmtPct(r.overuseRate)}</td>
+      <td class="text-right mono whitespace-nowrap">${r.scrapRate==null?'—':fmtPct(r.scrapRate)}</td>
+      <td class="text-right mono whitespace-nowrap">${fmtMoney(r.overuseAmt||0)}</td>
+      <td class="text-right mono whitespace-nowrap">${fmtMoney(r.scrapAmt||0)}</td>
+    `;
+    tr.addEventListener('click', () => {
+      state.selectedKey = r.key;
+      if ($('productSearch')) $('productSearch').value = r.product || '';
+      if ($('semiSearch')) $('semiSearch').value = r.semi || '';
+      const {start, end} = getDateRange();
+      applyGroupFilterAndRender(filterByRange(state.details, start, end));
+      renderSelectedItem();
+      const panel = $('itemPanel');
+      if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+function renderNewAndTop5Panels(drows){
+  try{
+    const rows = getTopPanelRowsFromDetails(drows || []);
+    const {start, end} = getDateRange();
+    const prev = getPreviousLaunchHighlightRange(start, end);
+    const prevLabel = state.mode === 'week' ? '前一週新品' : (state.mode === 'month' ? '前一個月新品' : '前段新品');
+    const sub = $('prevNewProductSubtitle');
+    if (sub) sub.textContent = prev ? `${prevLabel}：上市日期 ${prev.start} ～ ${prev.end}` : '僅週別 / 月別會判定前段新品';
+
+    let newRows = [];
+    if (prev){
+      newRows = rows.filter(r => {
+        const info = getLaunchInfo(r.product);
+        return info && info.ymd && isoInRange(info.ymd, prev.start, prev.end);
+      }).sort((a,b)=>((b.overuseAmt||0)+(b.scrapAmt||0))-((a.overuseAmt||0)+(a.scrapAmt||0)));
+    }
+    renderMetricProductRows('prevNewProductTbody', 'prevNewProductEmpty', newRows);
+
+    const kind = state.top5Kind || 'scrap';
+    const bS = $('top5ScrapBtn'), bO = $('top5OverBtn');
+    if (bS && bO){
+      if (kind === 'scrap'){
+        bS.className = 'px-3 py-1 rounded-full bg-slate-900 text-white';
+        bO.className = 'px-3 py-1 rounded-full text-slate-700 hover:bg-white';
+      } else {
+        bO.className = 'px-3 py-1 rounded-full bg-slate-900 text-white';
+        bS.className = 'px-3 py-1 rounded-full text-slate-700 hover:bg-white';
+      }
+    }
+    const top5 = rows.slice().sort((a,b)=> kind === 'scrap' ? ((b.scrapAmt||0)-(a.scrapAmt||0)) : ((b.overuseAmt||0)-(a.overuseAmt||0))).slice(0,5);
+    const topSub = $('top5ProductSubtitle');
+    if (topSub) topSub.textContent = kind === 'scrap' ? '依報廢金額排序前5大' : '依超用金額排序前5大';
+    renderMetricProductRows('top5ProductTbody', 'top5ProductEmpty', top5);
+  }catch(err){
+    console.error('[renderNewAndTop5Panels] failed', err);
+  }
+}
+
 function renderReasonCards(rangeStartISO, rangeEndISO){
   try{
     // 原因別分析卡片以「生產管理報表 7-1(週) -> （7）原因別分析」為主來源
@@ -4145,6 +4276,7 @@ function renderAll() {
   bindReasonCardClicks();
   renderKPIChart(augSummaryChart, start, end);
   renderRightChart(augSummaryChart, start, end);
+  renderNewAndTop5Panels(drowsChart);
   applyGroupFilterAndRender(drowsChart);
 }
 
@@ -5042,6 +5174,13 @@ function wireUI() {
     });
   });
 
+
+  // Top5 overuse/scrap panel toggle
+  const top5ScrapBtn = $('top5ScrapBtn');
+  const top5OverBtn = $('top5OverBtn');
+  if (top5ScrapBtn) top5ScrapBtn.addEventListener('click', () => { state.top5Kind = 'scrap'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+  if (top5OverBtn) top5OverBtn.addEventListener('click', () => { state.top5Kind = 'over'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+
   // keep week options aligned with selected year/month（不需按「套用」也會更新週別清單）
   $('yearSel').addEventListener('change', () => {
     const y = $('yearSel').value;
@@ -5406,7 +5545,7 @@ const tbody = $('top20ExpBody');
     const tr = document.createElement('tr');
     tr.className='border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap">${getTop20ProductButtonHTML(fixedPair.product, fixedPair.semi)}</td>
+      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.product || '—')}</button></td>
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.semi || '—')}</button></td>
       <td class="py-2 pr-4 text-right whitespace-nowrap">${(fixedPair.unitPrice!=null && isFinite(fixedPair.unitPrice)) ? fmtCurrency(fixedPair.unitPrice) : ((r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—")}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
