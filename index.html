@@ -562,55 +562,54 @@ function monthKeyFromISO(iso){
     </div>
 
 
-
-    <!-- 新品／前5大超用報廢 panels -->
-    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3" id="newTop5Panels">
+    <!-- New product / Top5 metric panels -->
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3" id="newTopPanels">
       <div class="card p-4">
-        <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
             <div class="text-sm font-semibold">新品超用／報廢</div>
-            <div id="newProductSubtitle" class="text-xs muted mt-1">列出前一週／前一月上市新品</div>
+            <div id="prevNewProductSubtitle" class="text-xs muted mt-1">—</div>
           </div>
-          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm shrink-0">
-            <button id="newProductScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
-            <button id="newProductOverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+            <button id="prevNewScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+            <button id="prevNewOverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
           </div>
         </div>
-        <div class="overflow-auto max-h-[220px]">
+        <div class="overflow-auto max-h-[280px] table-wrap">
           <table>
             <thead>
               <tr>
                 <th>商品名</th>
                 <th>半成品名</th>
-                <th id="newProductRateHeader" class="text-right">報廢率</th>
-                <th id="newProductAmtHeader" class="text-right">報廢金額</th>
+                <th id="prevNewRateHeader" class="text-right">報廢率</th>
+                <th id="prevNewAmtHeader" class="text-right">報廢金額</th>
               </tr>
             </thead>
-            <tbody id="newProductTbody"></tbody>
+            <tbody id="prevNewProductTbody"></tbody>
           </table>
         </div>
-        <div id="newProductEmpty" class="hidden text-sm muted py-4">此條件下無前段新品資料。</div>
+        <div id="prevNewProductEmpty" class="hidden text-sm muted py-4">此條件下無前段新品資料。</div>
       </div>
 
       <div class="card p-4">
-        <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
             <div class="text-sm font-semibold">前5大超用／報廢</div>
-            <div id="top5ProductSubtitle" class="text-xs muted mt-1">排除半成品名稱最後一字為「飯」與三角鹽飯類</div>
+            <div id="top5ProductSubtitle" class="text-xs muted mt-1">依目前選擇時間範圍彙總</div>
           </div>
-          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm shrink-0">
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
             <button id="top5ScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
             <button id="top5OverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
           </div>
         </div>
-        <div class="overflow-auto max-h-[220px]">
+        <div class="overflow-auto max-h-[280px] table-wrap">
           <table>
             <thead>
               <tr>
                 <th>商品名</th>
                 <th>半成品名</th>
-                <th id="top5ProductRateHeader" class="text-right">報廢率</th>
-                <th id="top5ProductAmtHeader" class="text-right">報廢金額</th>
+                <th id="top5RateHeader" class="text-right">報廢率</th>
+                <th id="top5AmtHeader" class="text-right">報廢金額</th>
               </tr>
             </thead>
             <tbody id="top5ProductTbody"></tbody>
@@ -619,7 +618,6 @@ function monthKeyFromISO(iso){
         <div id="top5ProductEmpty" class="hidden text-sm muted py-4">此條件下無前5大資料。</div>
       </div>
     </div>
-    
 
     <!-- 原因別分析 cards -->
     <div class="mt-4">
@@ -895,8 +893,8 @@ const state = {
   prevDetailExpanded: false, // 是否展開前一段時間範圍的日別明細
   rightMode: 'scrapTop10',
   rightMetric: 'amt',
-  newProductKind: 'scrap',
-  top5Kind: 'scrap',
+  prevNewMetric: 'scrap',
+  top5Metric: 'scrap',
   groupRows: [],
   filteredGroups: [],
   selectedKey: null,
@@ -2907,8 +2905,14 @@ async function ensureDataForMonthKeys(monthKeys){
 
 async function ensureDataForCurrentSelection(){
   const keys = computeNeededMonthKeysFromUI();
-  if (!keys.length) return;
-  await ensureDataForMonthKeys(keys);
+  try{
+    const r = getDateRange();
+    const prev = computePreviousDetailRange(r.start, r.end);
+    if (prev && prev.start && prev.end) keys.push(...monthKeysBetween(prev.start, prev.end));
+  }catch(e){}
+  const uniq = Array.from(new Set(keys.filter(Boolean)));
+  if (!uniq.length) return;
+  await ensureDataForMonthKeys(uniq);
 }
 
 async function loadAllData() {
@@ -3071,7 +3075,24 @@ function buildSelectors() {
       if (!isWasteFile(fp)) continue;
       const w = parseWasteWeekFromName(fp);
       if (!w || !w.start || !w.end) continue;
-      if (!wkMap.has(w.start)) wkMap.set(w.start, { start: w.start, end: w.end });
+
+      // 半成品日報檔名有時是一整段區間（例如 2026-0601-0615），
+      // 週別下拉不可直接顯示成 6/1~6/15，必須拆回網站定義的週別：週二～週一。
+      const sd = parseISO(w.start);
+      const ed = parseISO(w.end);
+      if (!(sd instanceof Date) || isNaN(sd) || !(ed instanceof Date) || isNaN(ed)) continue;
+
+      const cur = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate());
+      while (cur <= ed) {
+        const ws = weekStart(cur);
+        if (ws) {
+          const we = new Date(ws);
+          we.setDate(we.getDate() + 6);
+          const k = toISO(ws);
+          if (!wkMap.has(k)) wkMap.set(k, { start: k, end: toISO(we) });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
     }
   }
   state.weeksAll = Array.from(wkMap.values()).sort((a,b)=>safeLocaleCompare(a.start,b.start));
@@ -4190,51 +4211,70 @@ function getSelectedRangeRows() {
   return {start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart};
 }
 
-
-function isExcludedTop5Semi(semiName){
-  // 排除所有「飯」類半成品；半成品可能帶有括號年份，例如「三角鹽飯(109年)」，需先去括號再判斷。
-  const raw = safeStr(semiName).trim();
-  const cleaned = normalizeProdKey(stripParenText(raw));
-  if (!cleaned) return false;
-  if (cleaned.endsWith('飯')) return true;
-  // 使用者指定：三角鹽飯也屬於需排除類別，保留明確判斷避免括號/前綴造成漏判。
-  if (cleaned.includes('三角鹽飯')) return true;
-  return false;
+function fmtYuan(n){
+  const v = Number(n || 0);
+  if (!Number.isFinite(v)) return '—';
+  return Math.round(v).toLocaleString('zh-TW') + '元';
 }
 
-function fmtCompareMoney(prev, curr){
-  const f = (v) => {
-    const n = Number(v) || 0;
-    return Math.round(n).toLocaleString('zh-TW') + '元';
+function fmtCompareMetric(prevVal, currVal, type){
+  const p = Number(prevVal || 0);
+  const c = Number(currVal || 0);
+  if (type === 'rate') return `(前)${fmtPct(p)}→(現)${fmtPct(c)}`;
+  return `(前)${fmtYuan(p)}→(現)${fmtYuan(c)}`;
+}
+
+function metricModeLabel(mode){ return mode === 'over' ? '超用' : '報廢'; }
+function metricRateKey(mode){ return mode === 'over' ? 'overuseRate' : 'scrapRate'; }
+function metricAmtKey(mode){ return mode === 'over' ? 'overuseAmt' : 'scrapAmt'; }
+function metricQtyKey(mode){ return mode === 'over' ? 'overuseQty' : 'scrapQty'; }
+
+function makeGroupMap(rows){
+  const m = new Map();
+  for (const r of rows || []) m.set(r.key, r);
+  return m;
+}
+
+function zeroLikeGroup(row){
+  return {
+    key: row?.key || ((row?.product || '') + '||' + (row?.semi || '')),
+    product: row?.product || '',
+    semi: row?.semi || '',
+    order: 0,
+    scrapQty: 0,
+    scrapAmt: 0,
+    scrapRate: 0,
+    overuseQty: 0,
+    overuseAmt: 0,
+    overuseRate: 0
   };
-  return `(前)${f(prev)}→(現)${f(curr)}`;
 }
 
-function fmtCompareRate(prev, curr){
-  const f = (v) => Number.isFinite(Number(v)) ? fmtPct(Number(v)) : '—';
-  return `(前)${f(prev)}→(現)${f(curr)}`;
+function groupRowsForRange(startISO, endISO){
+  return aggregateGroups(filterByRange(state.details || [], startISO, endISO));
 }
 
-function setPillState(activeBtn, inactiveBtn){
+function isLaunchInRange(productName, startISO, endISO){
+  const info = getLaunchInfo(productName);
+  return !!(info && info.ymd && isoInRange(info.ymd, startISO, endISO));
+}
+
+function setToggleBtn(activeBtn, inactiveBtn){
   if (activeBtn) activeBtn.className = 'px-3 py-1 rounded-full bg-slate-900 text-white';
   if (inactiveBtn) inactiveBtn.className = 'px-3 py-1 rounded-full text-slate-700 hover:bg-white';
 }
 
-function aggregateGroupMapForRange(startISO, endISO){
-  const rows = filterByRange(state.details || [], startISO, endISO);
-  const groups = aggregateGroups(rows);
-  const map = new Map();
-  for (const g of groups) map.set(g.key, g);
-  return { rows, groups, map };
+function bindMetricPanelJump(tbody){
+  if (!tbody) return;
+  for (const b of tbody.querySelectorAll('.js-panel-jump')){
+    b.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      jumpToItemFromTop20(b.dataset.prod || '', b.dataset.semi || '');
+    });
+  }
 }
 
-function launchInPreviousRange(productName, prevRange){
-  if (!prevRange) return false;
-  const info = getLaunchInfo(productName);
-  return !!(info && info.ymd && isoInRange(info.ymd, prevRange.start, prevRange.end));
-}
-
-function renderMetricProductRows(tbodyId, emptyId, rows, kind, prevMap){
+function renderMetricRows(tbodyId, emptyId, rows, mode){
   const tbody = $(tbodyId);
   const empty = $(emptyId);
   if (!tbody) return;
@@ -4244,68 +4284,80 @@ function renderMetricProductRows(tbodyId, emptyId, rows, kind, prevMap){
     return;
   }
   if (empty) empty.classList.add('hidden');
-  for (const r of rows){
-    const prev = prevMap && prevMap.get(r.key) ? prevMap.get(r.key) : null;
-    const curAmt = kind === 'scrap' ? (Number(r.scrapAmt)||0) : (Number(r.overuseAmt)||0);
-    const prevAmt = prev ? (kind === 'scrap' ? (Number(prev.scrapAmt)||0) : (Number(prev.overuseAmt)||0)) : 0;
-    const curRate = kind === 'scrap' ? r.scrapRate : r.overuseRate;
-    const prevRate = prev ? (kind === 'scrap' ? prev.scrapRate : prev.overuseRate) : null;
+  const rateKey = metricRateKey(mode);
+  const amtKey = metricAmtKey(mode);
+  for (const item of rows){
+    const prev = item.prev || zeroLikeGroup(item.curr || item.base || {});
+    const curr = item.curr || zeroLikeGroup(item.prev || item.base || {});
+    const prod = curr.product || prev.product || item.product || '';
+    const semi = curr.semi || prev.semi || item.semi || '';
     const tr = document.createElement('tr');
-    tr.className = 'cursor-pointer';
+    tr.className = 'hover:bg-slate-50 cursor-pointer';
     tr.innerHTML = `
-      <td>${getProductNameHTML(r.product)}</td>
-      <td class="muted">${escapeHTML(r.semi || '—')}</td>
-      <td class="text-right mono whitespace-nowrap">${fmtCompareRate(prevRate, curRate)}</td>
-      <td class="text-right mono whitespace-nowrap">${fmtCompareMoney(prevAmt, curAmt)}</td>
+      <td><button type="button" class="js-panel-jump text-left hover:underline" data-prod="${escapeHTML(prod)}" data-semi="${escapeHTML(semi)}">${getProductNameHTML(prod)}</button></td>
+      <td class="muted"><button type="button" class="js-panel-jump text-left text-sky-700 hover:underline" data-prod="${escapeHTML(prod)}" data-semi="${escapeHTML(semi)}">${escapeHTML(semi || '—')}</button></td>
+      <td class="text-right mono whitespace-nowrap">${fmtCompareMetric(prev[rateKey], curr[rateKey], 'rate')}</td>
+      <td class="text-right mono whitespace-nowrap">${fmtCompareMetric(prev[amtKey], curr[amtKey], 'amt')}</td>
     `;
-    tr.addEventListener('click', () => {
-      state.selectedKey = r.key;
-      renderSelectedItem();
-      const panel = $('itemPanel');
-      if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
-    });
+    tr.addEventListener('click', ()=>jumpToItemFromTop20(prod, semi));
     tbody.appendChild(tr);
   }
+  bindMetricPanelJump(tbody);
 }
 
-function syncMetricPanelHeaders(prefix, kind){
-  const rate = $(`${prefix}RateHeader`);
-  const amt = $(`${prefix}AmtHeader`);
-  if (rate) rate.textContent = kind === 'scrap' ? '報廢率' : '超用率';
-  if (amt) amt.textContent = kind === 'scrap' ? '報廢金額' : '超用金額';
+function updateMetricPanelHeaders(){
+  const newMode = state.prevNewMetric || 'scrap';
+  const topMode = state.top5Metric || 'scrap';
+  const setText = (id, txt)=>{ const el=$(id); if (el) el.textContent = txt; };
+  setText('prevNewRateHeader', metricModeLabel(newMode) + '率');
+  setText('prevNewAmtHeader', metricModeLabel(newMode) + '金額');
+  setText('top5RateHeader', metricModeLabel(topMode) + '率');
+  setText('top5AmtHeader', metricModeLabel(topMode) + '金額');
+  if (newMode === 'scrap') setToggleBtn($('prevNewScrapBtn'), $('prevNewOverBtn'));
+  else setToggleBtn($('prevNewOverBtn'), $('prevNewScrapBtn'));
+  if (topMode === 'scrap') setToggleBtn($('top5ScrapBtn'), $('top5OverBtn'));
+  else setToggleBtn($('top5OverBtn'), $('top5ScrapBtn'));
 }
 
-function renderNewAndTop5Panels(drows){
-  try{
-    const {start, end} = getDateRange();
-    const prevRange = computePreviousDetailRange(start, end);
-    const currentGroups = aggregateGroups(drows || []);
-    const prevPack = prevRange ? aggregateGroupMapForRange(prevRange.start, prevRange.end) : {map:new Map()};
-    const prevMap = prevPack.map || new Map();
+function renderNewTopPanels(){
+  if (!$('prevNewProductTbody') || !$('top5ProductTbody')) return;
+  const {start, end} = getDateRange();
+  const prevRange = computePreviousDetailRange(start, end);
+  updateMetricPanelHeaders();
 
-    const newKind = state.newProductKind || 'scrap';
-    setPillState(newKind === 'scrap' ? $('newProductScrapBtn') : $('newProductOverBtn'), newKind === 'scrap' ? $('newProductOverBtn') : $('newProductScrapBtn'));
-    syncMetricPanelHeaders('newProduct', newKind);
-    const newSub = $('newProductSubtitle');
-    if (newSub) newSub.textContent = prevRange ? `列出上市日期位於 ${prevRange.start} ～ ${prevRange.end} 的新品` : '僅週別／月別會列出前段新品';
-    const newRows = currentGroups
-      .filter(r => launchInPreviousRange(r.product, prevRange))
-      .sort((a,b) => newKind === 'scrap' ? ((b.scrapAmt||0)-(a.scrapAmt||0)) : ((b.overuseAmt||0)-(a.overuseAmt||0)));
-    renderMetricProductRows('newProductTbody', 'newProductEmpty', newRows, newKind, prevMap);
+  if (!prevRange){
+    const sub = $('prevNewProductSubtitle');
+    if (sub) sub.textContent = '僅週別／月別／指定區間可判定前段新品';
+    renderMetricRows('prevNewProductTbody','prevNewProductEmpty',[], state.prevNewMetric || 'scrap');
+  } else {
+    const label = state.mode === 'month' ? '前一月新品' : (state.mode === 'week' ? '前一週新品' : '前段新品');
+    const sub = $('prevNewProductSubtitle');
+    if (sub) sub.textContent = `${label}：${prevRange.start} ～ ${prevRange.end}`;
 
-    const topKind = state.top5Kind || 'scrap';
-    setPillState(topKind === 'scrap' ? $('top5ScrapBtn') : $('top5OverBtn'), topKind === 'scrap' ? $('top5OverBtn') : $('top5ScrapBtn'));
-    syncMetricPanelHeaders('top5Product', topKind);
-    const topSub = $('top5ProductSubtitle');
-    if (topSub) topSub.textContent = prevRange ? `排除半成品名稱最後一字為「飯」與三角鹽飯類；比對：${prevRange.start} ～ ${prevRange.end}` : '排除半成品名稱最後一字為「飯」與三角鹽飯類';
-    const top5 = currentGroups
-      .filter(r => !isExcludedTop5Semi(r.semi))
-      .sort((a,b) => topKind === 'scrap' ? ((b.scrapAmt||0)-(a.scrapAmt||0)) : ((b.overuseAmt||0)-(a.overuseAmt||0)))
-      .slice(0,5);
-    renderMetricProductRows('top5ProductTbody', 'top5ProductEmpty', top5, topKind, prevMap);
-  }catch(err){
-    console.error('[renderNewAndTop5Panels] failed', err);
+    const currRows = groupRowsForRange(start, end);
+    const prevRows = groupRowsForRange(prevRange.start, prevRange.end);
+    const currMap = makeGroupMap(currRows);
+    const prevNew = prevRows
+      .filter(r => isLaunchInRange(r.product, prevRange.start, prevRange.end))
+      .map(prev => ({ prev, curr: currMap.get(prev.key) || zeroLikeGroup(prev) }))
+      .sort((a,b)=> (Number((b.curr||{})[metricAmtKey(state.prevNewMetric||'scrap')])||0) - (Number((a.curr||{})[metricAmtKey(state.prevNewMetric||'scrap')])||0));
+    renderMetricRows('prevNewProductTbody','prevNewProductEmpty',prevNew, state.prevNewMetric || 'scrap');
   }
+
+  const topSub = $('top5ProductSubtitle');
+  if (topSub) topSub.textContent = prevRange ? `排除半成品名稱最後一字為「飯」；比對：${prevRange.start} ～ ${prevRange.end}` : '排除半成品名稱最後一字為「飯」';
+
+  const topMode = state.top5Metric || 'scrap';
+  const currRowsTop = groupRowsForRange(start, end);
+  const prevMapTop = prevRange ? makeGroupMap(groupRowsForRange(prevRange.start, prevRange.end)) : new Map();
+  const amtKey = metricAmtKey(topMode);
+  const top5 = currRowsTop
+    .filter(r => !safeStr(r.semi).trim().endsWith('飯'))
+    .filter(r => (Number(r[amtKey]) || 0) > 0)
+    .sort((a,b)=> (Number(b[amtKey])||0) - (Number(a[amtKey])||0))
+    .slice(0,5)
+    .map(curr => ({ curr, prev: prevMapTop.get(curr.key) || zeroLikeGroup(curr) }));
+  renderMetricRows('top5ProductTbody','top5ProductEmpty',top5, topMode);
 }
 
 function renderAll() {
@@ -4317,7 +4369,7 @@ function renderAll() {
   bindReasonCardClicks();
   renderKPIChart(augSummaryChart, start, end);
   renderRightChart(augSummaryChart, start, end);
-  renderNewAndTop5Panels(drowsChart);
+  renderNewTopPanels();
   applyGroupFilterAndRender(drowsChart);
 }
 
@@ -5216,16 +5268,19 @@ function wireUI() {
   });
 
 
-
-  // 新品 / 前5大 面板切換
-  const newProductScrapBtn = $('newProductScrapBtn');
-  const newProductOverBtn = $('newProductOverBtn');
-  if (newProductScrapBtn) newProductScrapBtn.addEventListener('click', () => { state.newProductKind = 'scrap'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
-  if (newProductOverBtn) newProductOverBtn.addEventListener('click', () => { state.newProductKind = 'over'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
-  const top5ScrapBtn = $('top5ScrapBtn');
-  const top5OverBtn = $('top5OverBtn');
-  if (top5ScrapBtn) top5ScrapBtn.addEventListener('click', () => { state.top5Kind = 'scrap'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
-  if (top5OverBtn) top5OverBtn.addEventListener('click', () => { state.top5Kind = 'over'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+  // New product / Top5 panel metric buttons
+  const bindMetricToggle = (btnId, stateKey, value) => {
+    const btn = $(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      state[stateKey] = value;
+      renderNewTopPanels();
+    });
+  };
+  bindMetricToggle('prevNewScrapBtn', 'prevNewMetric', 'scrap');
+  bindMetricToggle('prevNewOverBtn', 'prevNewMetric', 'over');
+  bindMetricToggle('top5ScrapBtn', 'top5Metric', 'scrap');
+  bindMetricToggle('top5OverBtn', 'top5Metric', 'over');
 
   // keep week options aligned with selected year/month（不需按「套用」也會更新週別清單）
   $('yearSel').addEventListener('change', () => {
@@ -5540,38 +5595,6 @@ function jumpToItemFromTop20(prod, semi){
   }
 }
 
-
-function buildTop20FallbackFromDetails(kind, reasonKey){
-  try{
-    const {start, end} = getDateRange();
-    const metric = (kind === 'scrap') ? 'scrapAmt' : 'overuseAmt';
-    const m = new Map();
-    for (const d of (state.details || [])){
-      if (!d || !d.date || d.date < start || d.date > end) continue;
-      const amt = Number(d[metric]) || 0;
-      if (amt <= 0) continue;
-      const product = safeStr(d.product || '').trim();
-      const semi = safeStr(d.semi || '').trim();
-      if (!product && !semi) continue;
-      const key = product + '||' + semi;
-      if (!m.has(key)) m.set(key, {kind, reason: reasonKey || '', product, semi, amt:0, unitSum:0, unitN:0, desc:'', act:'', source:'明細彙總'});
-      const o = m.get(key);
-      o.amt += amt;
-      const up = Number(d.price ?? d.unitPrice);
-      if (Number.isFinite(up) && up > 0){ o.unitSum += up; o.unitN += 1; }
-    }
-    const out = Array.from(m.values()).map(o => {
-      o.unitPrice = o.unitN ? (o.unitSum / o.unitN) : null;
-      return o;
-    });
-    out.sort((a,b)=>(Number(b.amt)||0)-(Number(a.amt)||0));
-    return out.slice(0,20);
-  }catch(e){
-    console.warn('[buildTop20FallbackFromDetails] failed', e);
-    return [];
-  }
-}
-
 function renderTop20Expand(){
   const st = state._top20Exp;
   if (!st) return;
@@ -5591,47 +5614,18 @@ function renderTop20Expand(){
     $('top20ExpAmtHeader').textContent='超用金額';
   }
 
+  let rows = (state.top20Entries||[]).filter(r => r.kind===kind && normalizeReasonKey(r.reason)===normalizeReasonKey(reasonKey));
+
   const act = Array.isArray(st.activeSources) ? st.activeSources : [];
-  let allKindRows = (state.top20Entries||[]).filter(r => r.kind===kind);
-  if (act.length) allKindRows = allKindRows.filter(r => act.includes(r.source));
-
-  const wantedReason = normalizeReasonKey(reasonKey);
-  let rows = allKindRows.filter(r => {
-    const rk = normalizeReasonKey(r.reason);
-    if (rk && rk === wantedReason) return true;
-    // 有些 JFM 前二十大頁的「分析原因」欄可能被合併儲存格影響而讀成空白，
-    // 因此補充用原因說明/後續對策文字做弱比對，避免點擊原因卡片後表格空白。
-    const hay = normKey([r.reason, r.desc, r.act].join(' '));
-    return !!(wantedReason && hay && hay.includes(wantedReason));
-  });
-
-  function filterTop20RowsBySelectedPeriod(list){
-    let out = (list || []).slice();
-    if (rangeKey){
-      out = out.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
-    } else if (monthKey){
-      out = out.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
-    }
-    return out;
-  }
+  if (act.length) rows = rows.filter(r => act.includes(r.source));
 
   const rowsBeforePeriodFilter = rows.slice();
-  rows = filterTop20RowsBySelectedPeriod(rows);
-
-  // 若指定原因篩選後沒有資料，但同一份 JFM 的前二十大有資料，
-  // 改顯示該期間同類型前二十大，避免因來源表合併儲存格導致完全讀不出來。
-  if (!rows.length){
-    const fallback = filterTop20RowsBySelectedPeriod(allKindRows);
-    if (fallback.length) rows = fallback;
+  if (rangeKey){
+    rows = rows.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
+  } else if (monthKey){
+    rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
   }
-  if (!rows.length && rowsBeforePeriodFilter.length) rows = rowsBeforePeriodFilter;
-  if (!rows.length && act.length && allKindRows.length) rows = allKindRows;
-
-  // 最後保底：若 JFM 前二十大頁完全無法解析，改由半成品日報明細依金額彙總產生列表。
-  // 這不會有原因說明/後續對策，但可避免畫面只剩表頭。
-  if (!rows.length){
-    rows = buildTop20FallbackFromDetails(kind, reasonKey);
-  }
+  if (!rows.length && act.length) rows = rowsBeforePeriodFilter;
 
   const scopeMonthKey = (state.selection && state.selection.year && state.selection.month) ? `${state.selection.year}-${String(state.selection.month).padStart(2,'0')}` : null;
   const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO, scopeMonthKey);
@@ -5652,7 +5646,7 @@ const tbody = $('top20ExpBody');
     const tr = document.createElement('tr');
     tr.className='border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.product || '—')}</button></td>
+      <td class="py-2 pr-4 whitespace-nowrap">${getTop20ProductButtonHTML(fixedPair.product, fixedPair.semi)}</td>
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.semi || '—')}</button></td>
       <td class="py-2 pr-4 text-right whitespace-nowrap">${(fixedPair.unitPrice!=null && isFinite(fixedPair.unitPrice)) ? fmtCurrency(fixedPair.unitPrice) : ((r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—")}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
@@ -5708,12 +5702,6 @@ async function applySelectionFromUI(){
       // year mode uses year only
     }
     await ensureDataForCurrentSelection();
-    // 新品/前5大區塊需比對前一週或前一月，因此同步載入前段資料。
-    try{
-      const r0 = getDateRange();
-      const prevForPanels = computePreviousDetailRange(r0.start, r0.end);
-      if (prevForPanels) await ensureDataForMonthKeys(monthKeysBetween(prevForPanels.start, prevForPanels.end));
-    }catch(_e){}
 
     // Recompute active JFM source(s) for reason cards / Top20 based on filename rules
     state.activeJfmSources = computeActiveJfmSources();
