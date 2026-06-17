@@ -1137,6 +1137,12 @@ function getProductNameHTML(productName){
   return cls ? `<span class="${cls}">${safe}</span>` : safe;
 }
 
+function getTop20ProductButtonHTML(productName, semiName){
+  const cls = getLaunchHighlightClass(productName);
+  const linkCls = cls ? 'js-jump hover:underline' : 'js-jump text-sky-700 hover:underline';
+  return `<button type="button" class="${linkCls}" data-prod="${escapeHTML(productName || '')}" data-semi="${escapeHTML(semiName || '')}">${getProductNameHTML(productName)}</button>`;
+}
+
 // Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
 const weekStartTue = (d) => {
   const z = new Date(d);
@@ -1910,7 +1916,7 @@ function renderTop20Modal(){
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.product || '—')}</td>
+      <td class="py-2 pr-4 whitespace-nowrap">${getProductNameHTML(fixedPair.product)}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${escapeHTML(fixedPair.semi || '—')}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
       <td class="py-2 pr-4 whitespace-pre-wrap">${escapeHTML(r.desc||'')}</td>
@@ -5400,7 +5406,7 @@ const tbody = $('top20ExpBody');
     const tr = document.createElement('tr');
     tr.className='border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
-      <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.product || '—')}</button></td>
+      <td class="py-2 pr-4 whitespace-nowrap">${getTop20ProductButtonHTML(fixedPair.product, fixedPair.semi)}</td>
       <td class="py-2 pr-4 whitespace-nowrap"><button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(fixedPair.product)}" data-semi="${escapeHTML(fixedPair.semi)}">${escapeHTML(fixedPair.semi || '—')}</button></td>
       <td class="py-2 pr-4 text-right whitespace-nowrap">${(fixedPair.unitPrice!=null && isFinite(fixedPair.unitPrice)) ? fmtCurrency(fixedPair.unitPrice) : ((r.unitPrice!=null && isFinite(r.unitPrice)) ? fmtCurrency(r.unitPrice) : "—")}</td>
       <td class="py-2 pr-4 whitespace-nowrap">${fmtCurrency(r.amt||0)}</td>
