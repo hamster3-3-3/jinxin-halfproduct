@@ -986,23 +986,18 @@ const parseISO = (s) => {
 
 
 /* =========================
-   上市日期（鮮食開發確認表）載入
-   - 以 GitHub Pages 同網域相對路徑讀取：./2025-2026鮮食開發確認表.xlsx
-   - 若放在 /data 也可：./data/2025-2026鮮食開發確認表.xlsx
-   - 以「商品名稱」對應「上市日期(D)」，並計算距今天數（以使用者裝置的「今日」為準）
+   上市日期（日報首次出現日 + 1 天）
+   - 不再讀取「2025-2026鮮食開發確認表.xlsx」
+   - 以商品第一次出現在半成品生產日報的日期 + 1 天作為上市日期
+   - 紅色粗體：上市日期落在目前選取時間範圍內
+   - 橘色粗體：週別時落在前一週；月別時落在前一個月
 ========================= */
-state.launch = { loaded:false, map:new Map(), source:null, updatedAt:null };
-
-const LAUNCH_XLSX_CANDIDATES = [
-  './2025-2026鮮食開發確認表.xlsx',
-  './data/2025-2026鮮食開發確認表.xlsx'
-];
+state.launch = { loaded:false, map:new Map(), source:'daily-first-seen', updatedAt:null };
 
 const normalizeProdKey = (s) => safeStr(s).replace(/[\s\u3000]+/g,'').trim();
 const stripParenText = (s) => safeStr(s)
   .replace(/（[^）]*）/g,'')
   .replace(/\([^)]*\)/g,'');
-
 
 function fmtYMD(d){
   if (!(d instanceof Date) || isNaN(d)) return '';
@@ -1018,121 +1013,88 @@ function daysBetween(a, b){
   return Math.round((db - da) / 86400000);
 }
 
-// 解析像「暫定11/15」「11/15」這種沒有年份的日期：用今年/去年擇近
-function parseLooseMD(v){
-  if (v == null || v === '') return null;
-  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
-  let s = String(v).trim();
-  if (!s) return null;
-  s = s.replace(/\s+/g,'').replace(/^暫定/,'');
-  const d1 = parseISO(s);
-  if (d1) return d1;
-
-  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})$/);
-  if (!m) return null;
-  const mm = Number(m[1]), dd = Number(m[2]);
-  if (!(mm>=1 && mm<=12 && dd>=1 && dd<=31)) return null;
-
-  const today = new Date();
-  const cands = [
-    new Date(today.getFullYear(), mm-1, dd),
-    new Date(today.getFullYear()-1, mm-1, dd)
-  ];
-  cands.sort((x,y) => Math.abs(today - x) - Math.abs(today - y));
-  const best = cands[0];
-  return new Date(best.getFullYear(), best.getMonth(), best.getDate());
+function putLaunchInfo(map, productName, firstDate){
+  const base = safeStr(productName).trim();
+  if (!base || !(firstDate instanceof Date) || isNaN(firstDate)) return;
+  const launchDate = addDays(firstDate, 1);
+  const ymd = fmtYMD(launchDate);
+  if (!ymd) return;
+  const info = { date: launchDate, ymd, firstSeen: fmtYMD(firstDate), source:'daily-first-seen' };
+  const put = (k) => {
+    if (!k) return;
+    const prev = map.get(k);
+    // 商品第一次出現日應取最早；上市日期也就是最早出現日 + 1 天
+    if (!prev || info.ymd < prev.ymd) map.set(k, info);
+  };
+  const key1 = normalizeProdKey(base);
+  const key2 = normalizeProdKey(stripParenText(base));
+  put(key1);
+  if (key2 !== key1) put(key2);
 }
 
-function parseLaunchMapFromWB(wb){
-  const sn = wb.SheetNames?.[0];
-  const ws = sn ? wb.Sheets[sn] : null;
-  if (!ws) throw new Error('找不到工作表');
-  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
-  if (!aoa || !aoa.length) throw new Error('工作表空白');
-
-  // 找表頭列：同時包含「上市日期」與「商品名稱/商品名」
-  let hRow = -1;
-  const scan = Math.min(aoa.length, 150);
-  for (let i=0; i<scan; i++){
-    const row = aoa[i] || [];
-    const rowStr = row.map(c => normalizeHeader(c)).join('|');
-    if (rowStr.includes('上市日期') && (rowStr.includes('商品名稱') || rowStr.includes('商品名') || rowStr.includes('品名'))){
-      hRow = i; break;
-    }
+function rebuildLaunchMapFromDetails(details){
+  const firstMap = new Map();
+  for (const r of (details || [])){
+    const product = safeStr(r && r.product).trim();
+    const d = parseISO(r && r.date);
+    if (!product || !(d instanceof Date) || isNaN(d)) continue;
+    const key = normalizeProdKey(product);
+    if (!key) continue;
+    const prev = firstMap.get(product);
+    if (!prev || d < prev) firstMap.set(product, d);
   }
-  if (hRow < 0) throw new Error('找不到表頭列（上市日期/商品名稱）');
-
-  const header = aoa[hRow] || [];
-  let colDate = null;
-  let colProd = null;
-
-  for (let j=0; j<header.length; j++){
-    const h = normalizeHeader(header[j]);
-    if (!h) continue;
-    if (colDate == null && h.includes('上市日期')) colDate = j;
-    if (colProd == null && (h.includes('商品名稱') || h === '商品名' || h === '品名' || (h.includes('商品') && h.includes('名稱')))) colProd = j;
-  }
-  if (colDate == null || colProd == null) throw new Error('找不到上市日期或商品名稱欄位');
-
-  const map = new Map(); // key -> {date, ymd}
-  for (let i=hRow+1; i<aoa.length; i++){
-    const row = aoa[i] || [];
-    const prodRaw = toStr(row[colProd]).trim();
-    if (!prodRaw) continue;
-
-    const key1 = normalizeProdKey(prodRaw);
-    const key2 = normalizeProdKey(stripParenText(prodRaw));
-    if (!key1 && !key2) continue;
-
-    let dt = parseISO(row[colDate]);
-    if (!dt) dt = parseLooseMD(row[colDate]);
-    if (!dt) continue;
-
-    const ymd = fmtYMD(dt);
-    if (!ymd) continue;
-
-    const put = (k) => {
-      if (!k) return;
-      const prev = map.get(k);
-      if (!prev || prev.ymd < ymd) map.set(k, {date: dt, ymd});
-    };
-    put(key1);
-    if (key2 !== key1) put(key2);
-  }
+  const map = new Map();
+  for (const [product, firstDate] of firstMap.entries()) putLaunchInfo(map, product, firstDate);
+  state.launch.map = map;
+  state.launch.loaded = map.size > 0;
+  state.launch.source = 'loaded-daily-details';
+  state.launch.updatedAt = new Date();
   return map;
 }
 
-async function tryLoadLaunchMap(){
-  // reset
-  state.launch.loaded = false;
-  state.launch.map = new Map();
-  state.launch.source = null;
-
+async function buildLaunchMapFromDailyFiles(files){
+  const map = new Map();
+  let loaded = 0;
   let lastErr = null;
-  for (const url of LAUNCH_XLSX_CANDIDATES){
+  for (const f of (files || []).filter(isWasteFile)){
     try{
+      const url = './data/' + encodePath(f);
       const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + f);
       const ab = await r.arrayBuffer();
       const wb = XLSX.read(ab, {type:'array', cellDates:true});
-      const mp = parseLaunchMapFromWB(wb);
-      state.launch.map = mp;
-      state.launch.loaded = true;
-      state.launch.source = url;
-      state.launch.updatedAt = new Date();
-      return true;
-    } catch(e){
+      const rows = parseDetailsFromWB(wb, f);
+      for (const row of rows){
+        const product = safeStr(row && row.product).trim();
+        const firstDate = parseISO(row && row.date);
+        if (!product || !(firstDate instanceof Date) || isNaN(firstDate)) continue;
+        putLaunchInfo(map, product, firstDate);
+      }
+      loaded += 1;
+    }catch(e){
       lastErr = e;
+      console.warn('上市日期（日報首次出現）索引建立失敗：', f, e);
     }
   }
-  console.warn('上市日期表讀取失敗', lastErr);
+  if (map.size){
+    state.launch.map = map;
+    state.launch.loaded = true;
+    state.launch.source = 'all-daily-files';
+    state.launch.updatedAt = new Date();
+    return true;
+  }
+  console.warn('上市日期（日報首次出現）索引無資料', lastErr);
   return false;
 }
 
-function getLaunchCellHTML(productName){
+function getLaunchInfo(productName){
   const key1 = normalizeProdKey(productName);
   const key2 = normalizeProdKey(stripParenText(productName));
-  let info = (key1 ? state.launch?.map?.get(key1) : null) || (key2 ? state.launch?.map?.get(key2) : null);
+  return (key1 ? state.launch?.map?.get(key1) : null) || (key2 ? state.launch?.map?.get(key2) : null) || null;
+}
+
+function getLaunchCellHTML(productName){
+  const info = getLaunchInfo(productName);
   if (!info || !(info.date instanceof Date)) return '—';
   const today = new Date();
   const d = daysBetween(info.date, today);
@@ -1140,6 +1102,40 @@ function getLaunchCellHTML(productName){
   return `<div class="mono">${info.ymd}</div><div class="text-xs muted">${label}</div>`;
 }
 
+function isoInRange(iso, startISO, endISO){
+  return !!iso && !!startISO && !!endISO && iso >= startISO && iso <= endISO;
+}
+
+function getPreviousLaunchHighlightRange(startISO, endISO){
+  const s = parseISO(startISO);
+  const e = parseISO(endISO);
+  if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return null;
+  if (state.mode === 'week') {
+    return { start: toISO(addDays(s, -7)), end: toISO(addDays(e, -7)) };
+  }
+  if (state.mode === 'month') {
+    const y = s.getFullYear();
+    const m = s.getMonth();
+    return { start: toISO(new Date(y, m - 1, 1)), end: toISO(new Date(y, m, 0)) };
+  }
+  return null;
+}
+
+function getLaunchHighlightClass(productName){
+  const info = getLaunchInfo(productName);
+  if (!info || !info.ymd) return '';
+  const {start, end} = getDateRange();
+  if (isoInRange(info.ymd, start, end)) return 'text-red-600 font-bold';
+  const prev = getPreviousLaunchHighlightRange(start, end);
+  if (prev && isoInRange(info.ymd, prev.start, prev.end)) return 'text-orange-500 font-bold';
+  return '';
+}
+
+function getProductNameHTML(productName){
+  const cls = getLaunchHighlightClass(productName);
+  const safe = escapeHTML(productName || '—');
+  return cls ? `<span class="${cls}">${safe}</span>` : safe;
+}
 
 // Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
 const weekStartTue = (d) => {
@@ -2836,6 +2832,7 @@ async function ensureDataForMonthKeys(monthKeys){
   state.reasonWeeks = (state.reasonWeeks || []).concat(reasons);
   state.top20Entries = (state.top20Entries || []).concat(top20);
   dedupeLoadedData();
+  if (!state.launch || state.launch.source !== 'all-daily-files') rebuildLaunchMapFromDetails(state.details);
 
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   need.forEach(mk => state.loadedMonthKeys.add(mk));
@@ -2869,7 +2866,7 @@ async function loadAllData() {
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
-  state.launchPromise = tryLoadLaunchMap();
+  state.launchPromise = null;
 
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
@@ -2877,6 +2874,7 @@ async function loadAllData() {
 
   const wasteFiles = files.filter(isWasteFile);
   const jfmFiles = files.filter(isJfmFile);
+  state.launchPromise = buildLaunchMapFromDailyFiles(wasteFiles);
   state.jfmIndex = buildJfmIndex(jfmFiles);
   state.manifestIntervals = buildManifestIntervals(files);
   state.loadErrors = [];
@@ -4035,8 +4033,8 @@ function applyGroupFilterAndRender(drows) {
     tr.className = 'cursor-pointer';
     if (isNewLayout) {
       tr.innerHTML = `
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="mono">${getLaunchCellHTML(r.product)}</td>
         <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
         ${mayCols.map(c => `<td class="text-right mono">${fmtMayGroupCell(r, c)}</td>`).join('')}
@@ -4044,8 +4042,8 @@ function applyGroupFilterAndRender(drows) {
       `;
     } else {
       tr.innerHTML = `
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="mono">${getLaunchCellHTML(r.product)}</td>
         <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
         <td class="text-right mono">${fmtInt(r.refillQty)}</td>
@@ -4869,8 +4867,8 @@ function renderDetailTable(daily) {
     if (useNew) {
       tr.innerHTML = expandMode ? `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.expandQty, r.order, r.expandRate)}</td>
@@ -4882,8 +4880,8 @@ function renderDetailTable(daily) {
         <td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>
       ` : `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
@@ -4896,8 +4894,8 @@ function renderDetailTable(daily) {
     } else {
       tr.innerHTML = `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtInt(r.output)}</td>
         <td class="text-right mono">${fmtInt(r.refill)}</td>
