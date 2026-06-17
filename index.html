@@ -561,6 +561,64 @@ function monthKeyFromISO(iso){
       </div>
     </div>
 
+
+
+    <!-- 新品／前5大超用報廢 panels -->
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3" id="newTop5Panels">
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div class="text-sm font-semibold">新品超用／報廢</div>
+            <div id="newProductSubtitle" class="text-xs muted mt-1">列出前一週／前一月上市新品</div>
+          </div>
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm shrink-0">
+            <button id="newProductScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+            <button id="newProductOverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          </div>
+        </div>
+        <div class="overflow-auto max-h-[220px]">
+          <table>
+            <thead>
+              <tr>
+                <th>商品名</th>
+                <th>半成品名</th>
+                <th id="newProductRateHeader" class="text-right">報廢率</th>
+                <th id="newProductAmtHeader" class="text-right">報廢金額</th>
+              </tr>
+            </thead>
+            <tbody id="newProductTbody"></tbody>
+          </table>
+        </div>
+        <div id="newProductEmpty" class="hidden text-sm muted py-4">此條件下無前段新品資料。</div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div class="text-sm font-semibold">前5大超用／報廢</div>
+            <div id="top5ProductSubtitle" class="text-xs muted mt-1">排除半成品名稱最後一字為「飯」與三角鹽飯類</div>
+          </div>
+          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm shrink-0">
+            <button id="top5ScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+            <button id="top5OverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          </div>
+        </div>
+        <div class="overflow-auto max-h-[220px]">
+          <table>
+            <thead>
+              <tr>
+                <th>商品名</th>
+                <th>半成品名</th>
+                <th id="top5ProductRateHeader" class="text-right">報廢率</th>
+                <th id="top5ProductAmtHeader" class="text-right">報廢金額</th>
+              </tr>
+            </thead>
+            <tbody id="top5ProductTbody"></tbody>
+          </table>
+        </div>
+        <div id="top5ProductEmpty" class="hidden text-sm muted py-4">此條件下無前5大資料。</div>
+      </div>
+    </div>
     
 
     <!-- 原因別分析 cards -->
@@ -837,6 +895,8 @@ const state = {
   prevDetailExpanded: false, // 是否展開前一段時間範圍的日別明細
   rightMode: 'scrapTop10',
   rightMetric: 'amt',
+  newProductKind: 'scrap',
+  top5Kind: 'scrap',
   groupRows: [],
   filteredGroups: [],
   selectedKey: null,
@@ -986,23 +1046,18 @@ const parseISO = (s) => {
 
 
 /* =========================
-   上市日期（鮮食開發確認表）載入
-   - 以 GitHub Pages 同網域相對路徑讀取：./2025-2026鮮食開發確認表.xlsx
-   - 若放在 /data 也可：./data/2025-2026鮮食開發確認表.xlsx
-   - 以「商品名稱」對應「上市日期(D)」，並計算距今天數（以使用者裝置的「今日」為準）
+   上市日期（日報首次出現日 + 1 天）
+   - 不再讀取「2025-2026鮮食開發確認表.xlsx」
+   - 以商品第一次出現在半成品生產日報的日期 + 1 天作為上市日期
+   - 紅色粗體：上市日期落在目前選取時間範圍內
+   - 橘色粗體：週別時落在前一週；月別時落在前一個月
 ========================= */
-state.launch = { loaded:false, map:new Map(), source:null, updatedAt:null };
-
-const LAUNCH_XLSX_CANDIDATES = [
-  './2025-2026鮮食開發確認表.xlsx',
-  './data/2025-2026鮮食開發確認表.xlsx'
-];
+state.launch = { loaded:false, map:new Map(), source:'daily-first-seen', updatedAt:null };
 
 const normalizeProdKey = (s) => safeStr(s).replace(/[\s\u3000]+/g,'').trim();
 const stripParenText = (s) => safeStr(s)
   .replace(/（[^）]*）/g,'')
   .replace(/\([^)]*\)/g,'');
-
 
 function fmtYMD(d){
   if (!(d instanceof Date) || isNaN(d)) return '';
@@ -1018,121 +1073,88 @@ function daysBetween(a, b){
   return Math.round((db - da) / 86400000);
 }
 
-// 解析像「暫定11/15」「11/15」這種沒有年份的日期：用今年/去年擇近
-function parseLooseMD(v){
-  if (v == null || v === '') return null;
-  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
-  let s = String(v).trim();
-  if (!s) return null;
-  s = s.replace(/\s+/g,'').replace(/^暫定/,'');
-  const d1 = parseISO(s);
-  if (d1) return d1;
-
-  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})$/);
-  if (!m) return null;
-  const mm = Number(m[1]), dd = Number(m[2]);
-  if (!(mm>=1 && mm<=12 && dd>=1 && dd<=31)) return null;
-
-  const today = new Date();
-  const cands = [
-    new Date(today.getFullYear(), mm-1, dd),
-    new Date(today.getFullYear()-1, mm-1, dd)
-  ];
-  cands.sort((x,y) => Math.abs(today - x) - Math.abs(today - y));
-  const best = cands[0];
-  return new Date(best.getFullYear(), best.getMonth(), best.getDate());
+function putLaunchInfo(map, productName, firstDate){
+  const base = safeStr(productName).trim();
+  if (!base || !(firstDate instanceof Date) || isNaN(firstDate)) return;
+  const launchDate = addDays(firstDate, 1);
+  const ymd = fmtYMD(launchDate);
+  if (!ymd) return;
+  const info = { date: launchDate, ymd, firstSeen: fmtYMD(firstDate), source:'daily-first-seen' };
+  const put = (k) => {
+    if (!k) return;
+    const prev = map.get(k);
+    // 商品第一次出現日應取最早；上市日期也就是最早出現日 + 1 天
+    if (!prev || info.ymd < prev.ymd) map.set(k, info);
+  };
+  const key1 = normalizeProdKey(base);
+  const key2 = normalizeProdKey(stripParenText(base));
+  put(key1);
+  if (key2 !== key1) put(key2);
 }
 
-function parseLaunchMapFromWB(wb){
-  const sn = wb.SheetNames?.[0];
-  const ws = sn ? wb.Sheets[sn] : null;
-  if (!ws) throw new Error('找不到工作表');
-  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
-  if (!aoa || !aoa.length) throw new Error('工作表空白');
-
-  // 找表頭列：同時包含「上市日期」與「商品名稱/商品名」
-  let hRow = -1;
-  const scan = Math.min(aoa.length, 150);
-  for (let i=0; i<scan; i++){
-    const row = aoa[i] || [];
-    const rowStr = row.map(c => normalizeHeader(c)).join('|');
-    if (rowStr.includes('上市日期') && (rowStr.includes('商品名稱') || rowStr.includes('商品名') || rowStr.includes('品名'))){
-      hRow = i; break;
-    }
+function rebuildLaunchMapFromDetails(details){
+  const firstMap = new Map();
+  for (const r of (details || [])){
+    const product = safeStr(r && r.product).trim();
+    const d = parseISO(r && r.date);
+    if (!product || !(d instanceof Date) || isNaN(d)) continue;
+    const key = normalizeProdKey(product);
+    if (!key) continue;
+    const prev = firstMap.get(product);
+    if (!prev || d < prev) firstMap.set(product, d);
   }
-  if (hRow < 0) throw new Error('找不到表頭列（上市日期/商品名稱）');
-
-  const header = aoa[hRow] || [];
-  let colDate = null;
-  let colProd = null;
-
-  for (let j=0; j<header.length; j++){
-    const h = normalizeHeader(header[j]);
-    if (!h) continue;
-    if (colDate == null && h.includes('上市日期')) colDate = j;
-    if (colProd == null && (h.includes('商品名稱') || h === '商品名' || h === '品名' || (h.includes('商品') && h.includes('名稱')))) colProd = j;
-  }
-  if (colDate == null || colProd == null) throw new Error('找不到上市日期或商品名稱欄位');
-
-  const map = new Map(); // key -> {date, ymd}
-  for (let i=hRow+1; i<aoa.length; i++){
-    const row = aoa[i] || [];
-    const prodRaw = toStr(row[colProd]).trim();
-    if (!prodRaw) continue;
-
-    const key1 = normalizeProdKey(prodRaw);
-    const key2 = normalizeProdKey(stripParenText(prodRaw));
-    if (!key1 && !key2) continue;
-
-    let dt = parseISO(row[colDate]);
-    if (!dt) dt = parseLooseMD(row[colDate]);
-    if (!dt) continue;
-
-    const ymd = fmtYMD(dt);
-    if (!ymd) continue;
-
-    const put = (k) => {
-      if (!k) return;
-      const prev = map.get(k);
-      if (!prev || prev.ymd < ymd) map.set(k, {date: dt, ymd});
-    };
-    put(key1);
-    if (key2 !== key1) put(key2);
-  }
+  const map = new Map();
+  for (const [product, firstDate] of firstMap.entries()) putLaunchInfo(map, product, firstDate);
+  state.launch.map = map;
+  state.launch.loaded = map.size > 0;
+  state.launch.source = 'loaded-daily-details';
+  state.launch.updatedAt = new Date();
   return map;
 }
 
-async function tryLoadLaunchMap(){
-  // reset
-  state.launch.loaded = false;
-  state.launch.map = new Map();
-  state.launch.source = null;
-
+async function buildLaunchMapFromDailyFiles(files){
+  const map = new Map();
+  let loaded = 0;
   let lastErr = null;
-  for (const url of LAUNCH_XLSX_CANDIDATES){
+  for (const f of (files || []).filter(isWasteFile)){
     try{
+      const url = './data/' + encodePath(f);
       const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + f);
       const ab = await r.arrayBuffer();
       const wb = XLSX.read(ab, {type:'array', cellDates:true});
-      const mp = parseLaunchMapFromWB(wb);
-      state.launch.map = mp;
-      state.launch.loaded = true;
-      state.launch.source = url;
-      state.launch.updatedAt = new Date();
-      return true;
-    } catch(e){
+      const rows = parseDetailsFromWB(wb, f);
+      for (const row of rows){
+        const product = safeStr(row && row.product).trim();
+        const firstDate = parseISO(row && row.date);
+        if (!product || !(firstDate instanceof Date) || isNaN(firstDate)) continue;
+        putLaunchInfo(map, product, firstDate);
+      }
+      loaded += 1;
+    }catch(e){
       lastErr = e;
+      console.warn('上市日期（日報首次出現）索引建立失敗：', f, e);
     }
   }
-  console.warn('上市日期表讀取失敗', lastErr);
+  if (map.size){
+    state.launch.map = map;
+    state.launch.loaded = true;
+    state.launch.source = 'all-daily-files';
+    state.launch.updatedAt = new Date();
+    return true;
+  }
+  console.warn('上市日期（日報首次出現）索引無資料', lastErr);
   return false;
 }
 
-function getLaunchCellHTML(productName){
+function getLaunchInfo(productName){
   const key1 = normalizeProdKey(productName);
   const key2 = normalizeProdKey(stripParenText(productName));
-  let info = (key1 ? state.launch?.map?.get(key1) : null) || (key2 ? state.launch?.map?.get(key2) : null);
+  return (key1 ? state.launch?.map?.get(key1) : null) || (key2 ? state.launch?.map?.get(key2) : null) || null;
+}
+
+function getLaunchCellHTML(productName){
+  const info = getLaunchInfo(productName);
   if (!info || !(info.date instanceof Date)) return '—';
   const today = new Date();
   const d = daysBetween(info.date, today);
@@ -1140,6 +1162,40 @@ function getLaunchCellHTML(productName){
   return `<div class="mono">${info.ymd}</div><div class="text-xs muted">${label}</div>`;
 }
 
+function isoInRange(iso, startISO, endISO){
+  return !!iso && !!startISO && !!endISO && iso >= startISO && iso <= endISO;
+}
+
+function getPreviousLaunchHighlightRange(startISO, endISO){
+  const s = parseISO(startISO);
+  const e = parseISO(endISO);
+  if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return null;
+  if (state.mode === 'week') {
+    return { start: toISO(addDays(s, -7)), end: toISO(addDays(e, -7)) };
+  }
+  if (state.mode === 'month') {
+    const y = s.getFullYear();
+    const m = s.getMonth();
+    return { start: toISO(new Date(y, m - 1, 1)), end: toISO(new Date(y, m, 0)) };
+  }
+  return null;
+}
+
+function getLaunchHighlightClass(productName){
+  const info = getLaunchInfo(productName);
+  if (!info || !info.ymd) return '';
+  const {start, end} = getDateRange();
+  if (isoInRange(info.ymd, start, end)) return 'text-red-600 font-bold';
+  const prev = getPreviousLaunchHighlightRange(start, end);
+  if (prev && isoInRange(info.ymd, prev.start, prev.end)) return 'text-orange-500 font-bold';
+  return '';
+}
+
+function getProductNameHTML(productName){
+  const cls = getLaunchHighlightClass(productName);
+  const safe = escapeHTML(productName || '—');
+  return cls ? `<span class="${cls}">${safe}</span>` : safe;
+}
 
 // Week starts on Tuesday (Tue~Mon). Return the Tuesday date of the week that contains `d`.
 const weekStartTue = (d) => {
@@ -2836,6 +2892,7 @@ async function ensureDataForMonthKeys(monthKeys){
   state.reasonWeeks = (state.reasonWeeks || []).concat(reasons);
   state.top20Entries = (state.top20Entries || []).concat(top20);
   dedupeLoadedData();
+  if (!state.launch || state.launch.source !== 'all-daily-files') rebuildLaunchMapFromDetails(state.details);
 
   if (!state.summary.length) throw new Error('未解析到日別報廢率總表資料');
   need.forEach(mk => state.loadedMonthKeys.add(mk));
@@ -2869,7 +2926,7 @@ async function loadAllData() {
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
   ]);
 
-  state.launchPromise = tryLoadLaunchMap();
+  state.launchPromise = null;
 
   const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
@@ -2877,6 +2934,7 @@ async function loadAllData() {
 
   const wasteFiles = files.filter(isWasteFile);
   const jfmFiles = files.filter(isJfmFile);
+  state.launchPromise = buildLaunchMapFromDailyFiles(wasteFiles);
   state.jfmIndex = buildJfmIndex(jfmFiles);
   state.manifestIntervals = buildManifestIntervals(files);
   state.loadErrors = [];
@@ -4035,8 +4093,8 @@ function applyGroupFilterAndRender(drows) {
     tr.className = 'cursor-pointer';
     if (isNewLayout) {
       tr.innerHTML = `
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="mono">${getLaunchCellHTML(r.product)}</td>
         <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
         ${mayCols.map(c => `<td class="text-right mono">${fmtMayGroupCell(r, c)}</td>`).join('')}
@@ -4044,8 +4102,8 @@ function applyGroupFilterAndRender(drows) {
       `;
     } else {
       tr.innerHTML = `
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="mono">${getLaunchCellHTML(r.product)}</td>
         <td class="text-right mono">${r.unitPrice==null?'—':fmtUnitPrice(r.unitPrice)}</td>
         <td class="text-right mono">${fmtInt(r.refillQty)}</td>
@@ -4132,6 +4190,124 @@ function getSelectedRangeRows() {
   return {start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart};
 }
 
+
+function isExcludedTop5Semi(semiName){
+  // 排除所有「飯」類半成品；半成品可能帶有括號年份，例如「三角鹽飯(109年)」，需先去括號再判斷。
+  const raw = safeStr(semiName).trim();
+  const cleaned = normalizeProdKey(stripParenText(raw));
+  if (!cleaned) return false;
+  if (cleaned.endsWith('飯')) return true;
+  // 使用者指定：三角鹽飯也屬於需排除類別，保留明確判斷避免括號/前綴造成漏判。
+  if (cleaned.includes('三角鹽飯')) return true;
+  return false;
+}
+
+function fmtCompareMoney(prev, curr){
+  const f = (v) => {
+    const n = Number(v) || 0;
+    return Math.round(n).toLocaleString('zh-TW') + '元';
+  };
+  return `(前)${f(prev)}→(現)${f(curr)}`;
+}
+
+function fmtCompareRate(prev, curr){
+  const f = (v) => Number.isFinite(Number(v)) ? fmtPct(Number(v)) : '—';
+  return `(前)${f(prev)}→(現)${f(curr)}`;
+}
+
+function setPillState(activeBtn, inactiveBtn){
+  if (activeBtn) activeBtn.className = 'px-3 py-1 rounded-full bg-slate-900 text-white';
+  if (inactiveBtn) inactiveBtn.className = 'px-3 py-1 rounded-full text-slate-700 hover:bg-white';
+}
+
+function aggregateGroupMapForRange(startISO, endISO){
+  const rows = filterByRange(state.details || [], startISO, endISO);
+  const groups = aggregateGroups(rows);
+  const map = new Map();
+  for (const g of groups) map.set(g.key, g);
+  return { rows, groups, map };
+}
+
+function launchInPreviousRange(productName, prevRange){
+  if (!prevRange) return false;
+  const info = getLaunchInfo(productName);
+  return !!(info && info.ymd && isoInRange(info.ymd, prevRange.start, prevRange.end));
+}
+
+function renderMetricProductRows(tbodyId, emptyId, rows, kind, prevMap){
+  const tbody = $(tbodyId);
+  const empty = $(emptyId);
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!rows || !rows.length){
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+  for (const r of rows){
+    const prev = prevMap && prevMap.get(r.key) ? prevMap.get(r.key) : null;
+    const curAmt = kind === 'scrap' ? (Number(r.scrapAmt)||0) : (Number(r.overuseAmt)||0);
+    const prevAmt = prev ? (kind === 'scrap' ? (Number(prev.scrapAmt)||0) : (Number(prev.overuseAmt)||0)) : 0;
+    const curRate = kind === 'scrap' ? r.scrapRate : r.overuseRate;
+    const prevRate = prev ? (kind === 'scrap' ? prev.scrapRate : prev.overuseRate) : null;
+    const tr = document.createElement('tr');
+    tr.className = 'cursor-pointer';
+    tr.innerHTML = `
+      <td>${getProductNameHTML(r.product)}</td>
+      <td class="muted">${escapeHTML(r.semi || '—')}</td>
+      <td class="text-right mono whitespace-nowrap">${fmtCompareRate(prevRate, curRate)}</td>
+      <td class="text-right mono whitespace-nowrap">${fmtCompareMoney(prevAmt, curAmt)}</td>
+    `;
+    tr.addEventListener('click', () => {
+      state.selectedKey = r.key;
+      renderSelectedItem();
+      const panel = $('itemPanel');
+      if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+function syncMetricPanelHeaders(prefix, kind){
+  const rate = $(`${prefix}RateHeader`);
+  const amt = $(`${prefix}AmtHeader`);
+  if (rate) rate.textContent = kind === 'scrap' ? '報廢率' : '超用率';
+  if (amt) amt.textContent = kind === 'scrap' ? '報廢金額' : '超用金額';
+}
+
+function renderNewAndTop5Panels(drows){
+  try{
+    const {start, end} = getDateRange();
+    const prevRange = computePreviousDetailRange(start, end);
+    const currentGroups = aggregateGroups(drows || []);
+    const prevPack = prevRange ? aggregateGroupMapForRange(prevRange.start, prevRange.end) : {map:new Map()};
+    const prevMap = prevPack.map || new Map();
+
+    const newKind = state.newProductKind || 'scrap';
+    setPillState(newKind === 'scrap' ? $('newProductScrapBtn') : $('newProductOverBtn'), newKind === 'scrap' ? $('newProductOverBtn') : $('newProductScrapBtn'));
+    syncMetricPanelHeaders('newProduct', newKind);
+    const newSub = $('newProductSubtitle');
+    if (newSub) newSub.textContent = prevRange ? `列出上市日期位於 ${prevRange.start} ～ ${prevRange.end} 的新品` : '僅週別／月別會列出前段新品';
+    const newRows = currentGroups
+      .filter(r => launchInPreviousRange(r.product, prevRange))
+      .sort((a,b) => newKind === 'scrap' ? ((b.scrapAmt||0)-(a.scrapAmt||0)) : ((b.overuseAmt||0)-(a.overuseAmt||0)));
+    renderMetricProductRows('newProductTbody', 'newProductEmpty', newRows, newKind, prevMap);
+
+    const topKind = state.top5Kind || 'scrap';
+    setPillState(topKind === 'scrap' ? $('top5ScrapBtn') : $('top5OverBtn'), topKind === 'scrap' ? $('top5OverBtn') : $('top5ScrapBtn'));
+    syncMetricPanelHeaders('top5Product', topKind);
+    const topSub = $('top5ProductSubtitle');
+    if (topSub) topSub.textContent = prevRange ? `排除半成品名稱最後一字為「飯」與三角鹽飯類；比對：${prevRange.start} ～ ${prevRange.end}` : '排除半成品名稱最後一字為「飯」與三角鹽飯類';
+    const top5 = currentGroups
+      .filter(r => !isExcludedTop5Semi(r.semi))
+      .sort((a,b) => topKind === 'scrap' ? ((b.scrapAmt||0)-(a.scrapAmt||0)) : ((b.overuseAmt||0)-(a.overuseAmt||0)))
+      .slice(0,5);
+    renderMetricProductRows('top5ProductTbody', 'top5ProductEmpty', top5, topKind, prevMap);
+  }catch(err){
+    console.error('[renderNewAndTop5Panels] failed', err);
+  }
+}
+
 function renderAll() {
   const { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart } = getSelectedRangeRows();
   state.view = { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart };
@@ -4141,6 +4317,7 @@ function renderAll() {
   bindReasonCardClicks();
   renderKPIChart(augSummaryChart, start, end);
   renderRightChart(augSummaryChart, start, end);
+  renderNewAndTop5Panels(drowsChart);
   applyGroupFilterAndRender(drowsChart);
 }
 
@@ -4869,8 +5046,8 @@ function renderDetailTable(daily) {
     if (useNew) {
       tr.innerHTML = expandMode ? `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.expandQty, r.order, r.expandRate)}</td>
@@ -4882,8 +5059,8 @@ function renderDetailTable(daily) {
         <td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>
       ` : `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
@@ -4896,8 +5073,8 @@ function renderDetailTable(daily) {
     } else {
       tr.innerHTML = `
         <td class="mono">${r.date}</td>
-        <td>${r.product}</td>
-        <td class="muted">${r.semi}</td>
+        <td>${getProductNameHTML(r.product)}</td>
+        <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtInt(r.output)}</td>
         <td class="text-right mono">${fmtInt(r.refill)}</td>
@@ -5037,6 +5214,18 @@ function wireUI() {
       renderRightOnly();
     });
   });
+
+
+
+  // 新品 / 前5大 面板切換
+  const newProductScrapBtn = $('newProductScrapBtn');
+  const newProductOverBtn = $('newProductOverBtn');
+  if (newProductScrapBtn) newProductScrapBtn.addEventListener('click', () => { state.newProductKind = 'scrap'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+  if (newProductOverBtn) newProductOverBtn.addEventListener('click', () => { state.newProductKind = 'over'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+  const top5ScrapBtn = $('top5ScrapBtn');
+  const top5OverBtn = $('top5OverBtn');
+  if (top5ScrapBtn) top5ScrapBtn.addEventListener('click', () => { state.top5Kind = 'scrap'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
+  if (top5OverBtn) top5OverBtn.addEventListener('click', () => { state.top5Kind = 'over'; if (state.view) renderNewAndTop5Panels(state.view.drowsChart || state.view.drows || []); });
 
   // keep week options aligned with selected year/month（不需按「套用」也會更新週別清單）
   $('yearSel').addEventListener('change', () => {
@@ -5351,6 +5540,38 @@ function jumpToItemFromTop20(prod, semi){
   }
 }
 
+
+function buildTop20FallbackFromDetails(kind, reasonKey){
+  try{
+    const {start, end} = getDateRange();
+    const metric = (kind === 'scrap') ? 'scrapAmt' : 'overuseAmt';
+    const m = new Map();
+    for (const d of (state.details || [])){
+      if (!d || !d.date || d.date < start || d.date > end) continue;
+      const amt = Number(d[metric]) || 0;
+      if (amt <= 0) continue;
+      const product = safeStr(d.product || '').trim();
+      const semi = safeStr(d.semi || '').trim();
+      if (!product && !semi) continue;
+      const key = product + '||' + semi;
+      if (!m.has(key)) m.set(key, {kind, reason: reasonKey || '', product, semi, amt:0, unitSum:0, unitN:0, desc:'', act:'', source:'明細彙總'});
+      const o = m.get(key);
+      o.amt += amt;
+      const up = Number(d.price ?? d.unitPrice);
+      if (Number.isFinite(up) && up > 0){ o.unitSum += up; o.unitN += 1; }
+    }
+    const out = Array.from(m.values()).map(o => {
+      o.unitPrice = o.unitN ? (o.unitSum / o.unitN) : null;
+      return o;
+    });
+    out.sort((a,b)=>(Number(b.amt)||0)-(Number(a.amt)||0));
+    return out.slice(0,20);
+  }catch(e){
+    console.warn('[buildTop20FallbackFromDetails] failed', e);
+    return [];
+  }
+}
+
 function renderTop20Expand(){
   const st = state._top20Exp;
   if (!st) return;
@@ -5370,18 +5591,47 @@ function renderTop20Expand(){
     $('top20ExpAmtHeader').textContent='超用金額';
   }
 
-  let rows = (state.top20Entries||[]).filter(r => r.kind===kind && normalizeReasonKey(r.reason)===normalizeReasonKey(reasonKey));
-
   const act = Array.isArray(st.activeSources) ? st.activeSources : [];
-  if (act.length) rows = rows.filter(r => act.includes(r.source));
+  let allKindRows = (state.top20Entries||[]).filter(r => r.kind===kind);
+  if (act.length) allKindRows = allKindRows.filter(r => act.includes(r.source));
+
+  const wantedReason = normalizeReasonKey(reasonKey);
+  let rows = allKindRows.filter(r => {
+    const rk = normalizeReasonKey(r.reason);
+    if (rk && rk === wantedReason) return true;
+    // 有些 JFM 前二十大頁的「分析原因」欄可能被合併儲存格影響而讀成空白，
+    // 因此補充用原因說明/後續對策文字做弱比對，避免點擊原因卡片後表格空白。
+    const hay = normKey([r.reason, r.desc, r.act].join(' '));
+    return !!(wantedReason && hay && hay.includes(wantedReason));
+  });
+
+  function filterTop20RowsBySelectedPeriod(list){
+    let out = (list || []).slice();
+    if (rangeKey){
+      out = out.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
+    } else if (monthKey){
+      out = out.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
+    }
+    return out;
+  }
 
   const rowsBeforePeriodFilter = rows.slice();
-  if (rangeKey){
-    rows = rows.filter(r => r.rangeKey && (r.rangeKey===rangeKey || rangesOverlapMMDD(r.rangeKey, rangeKey)));
-  } else if (monthKey){
-    rows = rows.filter(r => (r.monthKey===monthKey) || (r.rangeKey && rangeKeyTouchesMonth(r.rangeKey, monthKey)));
+  rows = filterTop20RowsBySelectedPeriod(rows);
+
+  // 若指定原因篩選後沒有資料，但同一份 JFM 的前二十大有資料，
+  // 改顯示該期間同類型前二十大，避免因來源表合併儲存格導致完全讀不出來。
+  if (!rows.length){
+    const fallback = filterTop20RowsBySelectedPeriod(allKindRows);
+    if (fallback.length) rows = fallback;
   }
-  if (!rows.length && act.length) rows = rowsBeforePeriodFilter;
+  if (!rows.length && rowsBeforePeriodFilter.length) rows = rowsBeforePeriodFilter;
+  if (!rows.length && act.length && allKindRows.length) rows = allKindRows;
+
+  // 最後保底：若 JFM 前二十大頁完全無法解析，改由半成品日報明細依金額彙總產生列表。
+  // 這不會有原因說明/後續對策，但可避免畫面只剩表頭。
+  if (!rows.length){
+    rows = buildTop20FallbackFromDetails(kind, reasonKey);
+  }
 
   const scopeMonthKey = (state.selection && state.selection.year && state.selection.month) ? `${state.selection.year}-${String(state.selection.month).padStart(2,'0')}` : null;
   const dupCount = makeTop20DupCountBefore(kind, st.cutoffStartISO, scopeMonthKey);
@@ -5458,6 +5708,12 @@ async function applySelectionFromUI(){
       // year mode uses year only
     }
     await ensureDataForCurrentSelection();
+    // 新品/前5大區塊需比對前一週或前一月，因此同步載入前段資料。
+    try{
+      const r0 = getDateRange();
+      const prevForPanels = computePreviousDetailRange(r0.start, r0.end);
+      if (prevForPanels) await ensureDataForMonthKeys(monthKeysBetween(prevForPanels.start, prevForPanels.end));
+    }catch(_e){}
 
     // Recompute active JFM source(s) for reason cards / Top20 based on filename rules
     state.activeJfmSources = computeActiveJfmSources();
