@@ -2828,6 +2828,37 @@ function computeNeededMonthKeysFromUI(){
   return [];
 }
 
+function getRecentMonthKeysFromManifest(count=3){
+  const keys = new Set();
+  for (const fp of (state.manifestFiles || [])) {
+    for (const mk of getFileMonthCoverage(fp)) {
+      if (/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(mk || ''))) keys.add(mk);
+    }
+  }
+  const sorted = Array.from(keys).sort();
+  return sorted.slice(Math.max(0, sorted.length - count));
+}
+
+function setDefaultSelectionToLatestLoadedMonth(monthKeys){
+  const latest = (monthKeys || []).filter(Boolean).sort().at(-1);
+  if (!latest) return;
+  const y = latest.slice(0,4);
+  const mm = latest.slice(5,7);
+
+  state.mode = 'month';
+  state.selection.year = y;
+  state.selection.month = mm;
+
+  if ($('yearSel')) $('yearSel').value = y;
+  if (typeof state.renderMonthOptions === 'function') state.renderMonthOptions(y);
+  if ($('monthSel')) $('monthSel').value = mm;
+  if (typeof state.renderWeekOptions === 'function') state.renderWeekOptions(y, mm);
+
+  const [yy, mo] = latest.split('-').map(Number);
+  state.selection.start = `${y}-${mm}-01`;
+  state.selection.end = toISO(new Date(yy, mo, 0));
+}
+
 function dedupeLoadedData(){
   const sm = new Map();
   for (const r of (state.summary||[])) sm.set(r.date, r);
@@ -2941,7 +2972,15 @@ async function loadAllData() {
 
   const wasteFiles = files.filter(isWasteFile);
   const jfmFiles = files.filter(isJfmFile);
-  state.launchPromise = buildLaunchMapFromDailyFiles(wasteFiles);
+  // 上市日期完整索引改為延後背景建立，避免初始化時與近三個月資料搶讀取資源。
+  state.launchPromise = new Promise(resolve => {
+    setTimeout(() => {
+      buildLaunchMapFromDailyFiles(wasteFiles).then(resolve).catch(e => {
+        console.warn('上市日期完整索引背景建立失敗：', e);
+        resolve(false);
+      });
+    }, 6000);
+  });
   state.jfmIndex = buildJfmIndex(jfmFiles);
   state.manifestIntervals = buildManifestIntervals(files);
   state.loadErrors = [];
@@ -5738,13 +5777,25 @@ async function init(force=false) {
   try {
     await loadAllData();
     buildSelectors();
+
+    // 優先載入近三個月，避免預設年別一次讀完整年度造成等待過久。
+    const recentMonthKeys = getRecentMonthKeysFromManifest(3);
+    if (recentMonthKeys.length) {
+      $('dataStatus').innerHTML = `<span class="loader"></span> 優先載入近三個月資料（${recentMonthKeys.join(', ')}）...`;
+      setDefaultSelectionToLatestLoadedMonth(recentMonthKeys);
+      await ensureDataForMonthKeys(recentMonthKeys);
+      buildSelectors();
+      setDefaultSelectionToLatestLoadedMonth(recentMonthKeys);
+      $('dataStatus').textContent = `已優先載入近三個月資料（${recentMonthKeys.join(', ')}）`;
+    }
+
     wireUI();
     initStickyControls();
     syncModeUI();
     bindAutoApply();
-    // auto-apply current selector values（依目前選取月份延遲載入）
+    // auto-apply current selector values（優先使用已載入的近三個月資料）
     await applySelectionFromUI();
-    // 上市日期背景補載，不阻塞主畫面
+    // 上市日期完整索引延後背景補載，不阻塞主畫面
     Promise.resolve(state.launchPromise).then(()=>{ try{ renderAll(); if (state.selectedKey) renderSelectedItem(); }catch(e){} }).catch(()=>{});
     state.loaded = true;
   } catch (e) {
