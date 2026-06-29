@@ -54,7 +54,40 @@ function fmtCurrency(n){
 
 function normDigits(s){ return String(s||'').replace(/\D/g,''); }
 function rangeKeyFromMonthCell(v){
-  const dig = normDigits(v);
+  if (v == null) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
+  const s = raw
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[％]/g, '%')
+    .replace(/[～~—–－]/g, '-')
+    .replace(/\s+/g, '');
+
+  const pad2 = (x) => String(Number(x)).padStart(2, '0');
+  const pad4 = (x) => {
+    const d = String(x || '').replace(/\D/g, '');
+    if (d.length === 3) return '0' + d;
+    if (d.length === 4) return d;
+    return null;
+  };
+
+  // 6/2-6/8、06/02-06/08、6.2-6.8
+  let m = s.match(/(\d{1,2})[\/.](\d{1,2})-(\d{1,2})[\/.](\d{1,2})/);
+  if (m) return pad2(m[1]) + pad2(m[2]) + '-' + pad2(m[3]) + pad2(m[4]);
+
+  // 6/2-8 means same month
+  m = s.match(/(\d{1,2})[\/.](\d{1,2})-(\d{1,2})(?![\/.])/);
+  if (m) return pad2(m[1]) + pad2(m[2]) + '-' + pad2(m[1]) + pad2(m[3]);
+
+  // 0602-0608、602-608
+  m = s.match(/(\d{3,4})-(\d{3,4})/);
+  if (m){
+    const a = pad4(m[1]);
+    const b = pad4(m[2]);
+    if (a && b) return a + '-' + b;
+  }
+
+  const dig = normDigits(s);
   if (dig.length >= 8){
     const a = dig.slice(0,4);
     const b = dig.slice(4,8);
@@ -1725,13 +1758,19 @@ function inferMonthKeyFromFileName(fileName){
 
 
 function monthKeyFromRangeKey(rangeKey, fileName){
-  const y = (safeStr(fileName).match(/(20\d{2})/)||[])[1];
-  if (!y || !rangeKey) return null;
+  const y0 = (safeStr(fileName).match(/(20\d{2})/)||[])[1];
+  if (!y0 || !rangeKey) return null;
   const parts = String(rangeKey).split('-');
   if (parts.length !== 2) return null;
+  const start = parts[0];
   const end = parts[1];
-  if (!end || end.length !== 4) return null;
-  const mm = end.slice(0,2);
+  if (!start || !end || start.length !== 4 || end.length !== 4) return null;
+  const sm = Number(start.slice(0,2));
+  const em = Number(end.slice(0,2));
+  if (!sm || !em) return null;
+  let y = Number(y0);
+  if (em < sm) y += 1;
+  const mm = String(em).padStart(2,'0');
   return y + '-' + mm;
 }
 
@@ -1739,10 +1778,17 @@ function monthKeyFromRangeKey(rangeKey, fileName){
 function normalizeReasonKey(s){
   const t = normKey(s);
   if (!t) return '';
-  if (t.includes(normKey('展開量高於105%')) || t.includes(normKey('展開量高於１０5％')) || t.includes(normKey('展開量高於105％'))) return 'above105';
+  if (
+    t.includes(normKey('展開量高於105%')) ||
+    t.includes(normKey('展開量高於１０5％')) ||
+    t.includes(normKey('展開量高於105％')) ||
+    t.includes(normKey('展開量高於需求量')) ||
+    t.includes(normKey('展開高於需求')) ||
+    t.includes(normKey('高於需求量'))
+  ) return 'above105';
   if (t.includes(normKey('調理多產'))) return 'tooMuch';
   if (t.includes(normKey('製程不穩')) || t.includes(normKey('製程不穩定'))) return 'process';
-  if (t.includes(normKey('取樣不穩')) || t.includes(normKey('取樣不穩定'))) return 'sample';
+  if (t.includes(normKey('取樣不穩')) || t.includes(normKey('取樣不穩定')) || t.includes(normKey('抓樣不穩')) || t.includes(normKey('抓樣不穩定'))) return 'sample';
   if (t.includes(normKey('原物料規格'))) return 'raw';
   if (t.includes(normKey('研發設定'))) return 'rd';
   if (t.includes(normKey('其他原因'))) return 'other';
@@ -1763,10 +1809,12 @@ function parseTop20FromWB(wb, fileName){
     const sname = findTop20SheetName(wb, kind);
     if (!sname) continue;
     const ws = wb.Sheets[sname];
-    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
     if (!rows || !rows.length) continue;
 
-    const headerRows = Math.min(8, rows.length);
+    // Top20 表通常有 2~4 列多層表頭，但原因欄與備註商品名可能在 AA 以後，
+    // 因此先掃前 10 列組合欄名，再用「排序」欄的 1~20 判定資料列。
+    const headerRows = Math.min(10, rows.length);
     const maxC = Math.max(...rows.slice(0, headerRows).map(r => (r || []).length), 0);
     const colLabels = new Array(maxC).fill("");
     for (let c=0; c<maxC; c++){
@@ -1778,9 +1826,6 @@ function parseTop20FromWB(wb, fileName){
       colLabels[c] = parts.join("|");
     }
 
-    // 前二十大明細表的「商品名」與「半成品名」常為多層表頭或合併儲存格。
-    // 舊版用「名稱」作為半成品欄位的 fallback，容易抓到「商品名稱」欄，造成商品名/半成品名錯位。
-    // 這裡改用明確欄位辨識：商品欄不得包含半成品；半成品欄必須包含半成品。
     const findCol = (needList, excludeList=[])=>{
       let best = -1;
       let bestScore = -1;
@@ -1808,7 +1853,6 @@ function parseTop20FromWB(wb, fileName){
 
     const findNearbyProductCol = (semiCol)=>{
       if (semiCol == null || semiCol < 0) return -1;
-      // 常見版面為：排序｜商品名｜半成品名｜單價｜金額...
       const candidates = [semiCol-1, semiCol-2, semiCol+1, semiCol+2];
       for (const c of candidates){
         if (c < 0 || c >= colLabels.length) continue;
@@ -1819,21 +1863,29 @@ function parseTop20FromWB(wb, fileName){
       return -1;
     };
 
+    const cMonth    = findCol(['月別','週別','期間']);
     const cSort     = findCol(['排序','排名','序號']);
     const cSemiName = findCol(['半成品名稱','半成品名','半成品'], ['商品']);
     let cProduct    = findCol(['備註商品名稱','備註-商品名稱','備註商品名','商品名稱','商品名','商品'], ['半成品','分析原因','原因說明','後續對策','單價','金額','排序','排名','序號']);
     if (cProduct < 0) cProduct = findNearbyProductCol(cSemiName);
 
     const cAmt      = (kind==='scrap') ? findCol(['報廢金額']) : findCol(['超用金額']);
-    const cUnit     = findCol(['單價']);
+    const cUnit     = findCol(['半成品單價','單價']);
     const cReason   = findCol(['分析原因','原因別','原因分類']);
     const cDesc     = findCol(['原因說明']);
     const cAct      = findCol(['後續對策','對策']);
 
-    // 由「排序」欄後第一列開始掃描；若找不到排序欄，保留原本第 6 列開始的邏輯。
-    const dataStart = Math.min(rows.length, Math.max(6, headerRows));
-    for (let r=dataStart; r<rows.length; r++){
+    let currentRangeKey = fileRangeKey || null;
+
+    // 不從固定第 8 列開始，避免新版表（資料列從第 5 列開始）漏掉前幾名。
+    for (let r=0; r<rows.length; r++){
       const row = rows[r] || [];
+
+      if (cMonth >= 0){
+        const cellRange = rangeKeyFromMonthCell(row[cMonth]);
+        if (cellRange) currentRangeKey = cellRange;
+      }
+
       const sortVal = (cSort>=0) ? asNumber(row[cSort]) : NaN;
       const semi = (cSemiName>=0) ? safeStr(row[cSemiName]).trim() : '';
       const productRaw = (cProduct>=0) ? safeStr(row[cProduct]).trim() : '';
@@ -1844,22 +1896,20 @@ function parseTop20FromWB(wb, fileName){
       if (!(Number.isFinite(sortVal) && sortVal >= 1 && sortVal <= 20)) continue;
       if (!semi && !productRaw && !reason && !desc && !act) continue;
 
+      // 若該資料列的月別欄位有值，優先使用資料列自己的月別；否則沿用上方合併儲存格的月別。
+      const rowRangeKey = (cMonth>=0 ? rangeKeyFromMonthCell(row[cMonth]) : null) || currentRangeKey || fileRangeKey || null;
+      const rowMonthKey = rowRangeKey ? monthKeyFromRangeKey(rowRangeKey, fileName) : inferredMonthKey;
       const amt = (cAmt>=0) ? asNumber(row[cAmt]) : NaN;
       const unitPrice = (cUnit>=0) ? asNumber(row[cUnit]) : NaN;
 
-      // 商品名不可再 fallback 成半成品名，否則會造成畫面看起來「商品/半成品對不上」。
-      // 若來源表沒有商品名，先留空，後續 render 時會用半成品展開資料輔助補正。
-      const product = productRaw || '';
-      const semiName = semi || '';
-
       out.push({
         kind,
-        rangeKey: fileRangeKey || null,
-        monthKey: inferredMonthKey || null,
+        rangeKey: rowRangeKey || null,
+        monthKey: rowMonthKey || null,
         reason,
         reasonKey: normalizeReasonKey(reason),
-        product,
-        semi: semiName,
+        product: productRaw || '',
+        semi: semi || '',
         unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
         amt: Number.isFinite(amt) ? amt : 0,
         desc,
@@ -2366,10 +2416,10 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
 // - 以 (週起-週迄, 原因) 作為 key
 // =========================
 const REASON_DEFS = [
-  { key:'above105',   label:'展開量高於105%',  tokens:['展開量高於105','展開量高於１０5','展開量高於105%','展開量高於105％'] },
+  { key:'above105',   label:'展開量高於105%',  tokens:['展開量高於105','展開量高於１０5','展開量高於105%','展開量高於105％','展開量高於需求量','展開高於需求','高於需求量'] },
   { key:'tooMuch',    label:'調理多產',        tokens:['調理多產'] },
   { key:'process',    label:'製程不穩',        tokens:['製程不穩','製程不穩定'] },
-  { key:'sample',     label:'取樣不穩',        tokens:['取樣不穩','取樣不穩定'] },
+  { key:'sample',     label:'取樣不穩',        tokens:['取樣不穩','取樣不穩定','抓樣不穩','抓樣不穩定'] },
   { key:'raw',        label:'原物料規格',      tokens:['原物料規格'] },
   { key:'rd',         label:'研發設定',        tokens:['研發設定'] },
   { key:'other',      label:'其他原因',        tokens:['其他原因'] },
@@ -5612,6 +5662,14 @@ function resolveTop20DisplayPair(r, kind){
     semi: best.semi || fallback.semi,
     unitPrice: Number.isFinite(best.unitPrice) ? best.unitPrice : fallback.unitPrice
   };
+}
+
+
+function getTop20ProductButtonHTML(prod, semi){
+  const p = safeStr(prod).trim();
+  const s = safeStr(semi).trim();
+  const label = p || '—';
+  return `<button type="button" class="js-jump text-sky-700 hover:underline" data-prod="${escapeHTML(p)}" data-semi="${escapeHTML(s)}">${escapeHTML(label)}</button>`;
 }
 
 function jumpToItemFromTop20(prod, semi){
