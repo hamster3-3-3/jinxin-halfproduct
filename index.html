@@ -1665,31 +1665,49 @@ function parseSummaryFromWB(wb, fileName) {
   const idxSharedShare = findGroupSub('共用類廢棄', '構成比');
 
   const out = [];
+  const fileStart = parseFileStartFromName(fileName);
+  const fileSpan = parseFileSpanFromName(fileName);
+  const fileSpanStartISO = fileSpan ? toISO(fileSpan.start) : null;
+  const fileSpanEndISO = fileSpan ? toISO(fileSpan.end) : null;
+
   for (let r=hRow+2;r<rows.length;r++) { // hRow+1 為子表頭
     const row = rows[r];
     const d = parseMaybeDate(row[idxDate]);
     if (!d) continue;
 
+    const dateISO = toISO(d);
+    const sales = asNumber(row[idxSales]);
+    const scrapAmt = asNumber(row[idxScrapAmt]);
+    const scrapRate = asNumber(row[idxScrapRate]);
+    const overuseAmt = asNumber(row[idxOverAmt]);
+    const overuseRate = asNumber(row[idxOverRate]);
+
+    // 月初檔案常會在「日別報廢率總表」保留上一週/上月的日期列，
+    // 但營業額、報廢、超用為空；跨月週別若載入兩份檔案，這些空白列會覆蓋前一月真實數據。
+    // 因此日別 KPI 僅採用檔名涵蓋期間內的列；例如 2026-0601-0622 檔只保留 6/1 之後，
+    // 5/26~5/31 則由 2026-0501-0531 檔提供。
+    const outsideFileSpan = fileSpanStartISO && fileSpanEndISO && (dateISO < fileSpanStartISO || dateISO > fileSpanEndISO);
+    const hasCoreKpi = [sales, scrapAmt, overuseAmt].some(v => Number.isFinite(v) && Math.abs(v) > 0);
+    if (outsideFileSpan && !hasCoreKpi) continue;
+
     out.push({
-      date: toISO(d),
-      sales: Number(row[idxSales] ?? 0) || 0,
-      scrapAmt: Number(row[idxScrapAmt] ?? 0) || 0,
-      scrapRate: Number(row[idxScrapRate] ?? 0) || 0,
-      overuseAmt: Number(row[idxOverAmt] ?? 0) || 0,
-      overuseRate: Number(row[idxOverRate] ?? 0) || 0,
-      topScrapAmt: Number(row[idxTopScrapAmt] ?? 0) || 0,
-      topScrapShare: Number(row[idxTopScrapShare] ?? 0) || 0,
-      topOverAmt: Number(row[idxTopOverAmt] ?? 0) || 0,
-      topOverShare: Number(row[idxTopOverShare] ?? 0) || 0,
-      sharedAmt: Number(row[idxSharedAmt] ?? 0) || 0,
-      sharedShare: Number(row[idxSharedShare] ?? 0) || 0,
+      date: dateISO,
+      sales: Number.isFinite(sales) ? sales : 0,
+      scrapAmt: Number.isFinite(scrapAmt) ? scrapAmt : 0,
+      scrapRate: Number.isFinite(scrapRate) ? scrapRate : 0,
+      overuseAmt: Number.isFinite(overuseAmt) ? overuseAmt : 0,
+      overuseRate: Number.isFinite(overuseRate) ? overuseRate : 0,
+      topScrapAmt: asNumber(row[idxTopScrapAmt]) || 0,
+      topScrapShare: asNumber(row[idxTopScrapShare]) || 0,
+      topOverAmt: asNumber(row[idxTopOverAmt]) || 0,
+      topOverShare: asNumber(row[idxTopOverShare]) || 0,
+      sharedAmt: asNumber(row[idxSharedAmt]) || 0,
+      sharedShare: asNumber(row[idxSharedShare]) || 0,
     });
   }
   
   // 有些檔案的「日別報廢率總表」日期欄可能仍保留上月快取（例如 11 月檔案顯示 10 月日期）
   // 以檔名的起始年月作為參照，若主體年月不一致，則整體平移月份，避免月份缺漏（例如缺少 11 月）。
-  const fileStart = parseFileStartFromName(fileName);
-  const fileSpan = parseFileSpanFromName(fileName);
   if (fileStart && out.length) {
     const expYM = toISO(fileStart).slice(0,7);
     const coveredMonths = fileSpan ? monthKeysBetween(toISO(fileSpan.start), toISO(fileSpan.end)) : [expYM];
@@ -2861,7 +2879,17 @@ function computeNeededMonthKeysFromUI(){
   if (mode === 'week') {
     const ws = $('weekSel') ? $('weekSel').value : state.selection.weekStart;
     const w = (state.weeks || []).find(x => x.start === ws);
-    return w ? monthKeysBetween(w.start, w.end) : ((y && m) ? [`${y}-${m}`] : []);
+    if (w && w.start && w.end) return monthKeysBetween(w.start, w.end);
+
+    // 週別下拉有時只保存起始日；跨月週別不能退回只載入 monthSel，
+    // 必須直接用週起始日 + 6 天推算完整期間，確保 05/26~06/01 會同時載入 5 月與 6 月檔案。
+    const ds = parseISO(ws);
+    if (ds instanceof Date && !isNaN(ds)) {
+      const startISO = toISO(ds);
+      const endISO = toISO(addDays(ds, 6));
+      return monthKeysBetween(startISO, endISO);
+    }
+    return (y && m) ? [`${y}-${m}`] : [];
   }
   if (mode === 'day') {
     const d = $('daySel') ? $('daySel').value : state.selection.day;
@@ -2909,9 +2937,42 @@ function setDefaultSelectionToLatestLoadedMonth(monthKeys){
   state.selection.end = toISO(new Date(yy, mo, 0));
 }
 
+function summaryCompletenessScore(r){
+  if (!r) return -1;
+  const core = ['sales','scrapAmt','scrapRate','overuseAmt','overuseRate'];
+  return core.reduce((score, k) => {
+    const v = Number(r[k]);
+    return score + (Number.isFinite(v) && Math.abs(v) > 0 ? 1 : 0);
+  }, 0);
+}
+
+function mergeSummaryRows(oldRow, newRow){
+  if (!oldRow) return newRow;
+  if (!newRow) return oldRow;
+
+  // 同一日期可能同時存在於「5 月檔」與「6 月檔」。
+  // 若後載入的是月初檔保留的上月空白列，不可覆蓋已解析出的真實營業額/報廢/超用。
+  const oldScore = summaryCompletenessScore(oldRow);
+  const newScore = summaryCompletenessScore(newRow);
+  if (newScore > oldScore) return Object.assign({}, oldRow, newRow);
+  if (newScore < oldScore) return oldRow;
+
+  const merged = Object.assign({}, oldRow);
+  for (const [k, v] of Object.entries(newRow)){
+    if (k === 'date') continue;
+    const nv = Number(v);
+    const ov = Number(merged[k]);
+    if ((!Number.isFinite(ov) || Math.abs(ov) === 0) && Number.isFinite(nv) && Math.abs(nv) > 0) merged[k] = v;
+  }
+  return merged;
+}
+
 function dedupeLoadedData(){
   const sm = new Map();
-  for (const r of (state.summary||[])) sm.set(r.date, r);
+  for (const r of (state.summary||[])) {
+    if (!r || !r.date) continue;
+    sm.set(r.date, mergeSummaryRows(sm.get(r.date), r));
+  }
   state.summary = Array.from(sm.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
   state.details = (state.details||[]).sort((a,b)=>safeLocaleCompare(a.date,b.date));
