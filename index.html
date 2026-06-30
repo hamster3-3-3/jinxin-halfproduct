@@ -4141,6 +4141,14 @@ function getMayGroupColumns(sortValue){
     { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
   ];
 }
+
+function getMayGroupSourceColumn(sortValue){
+  const sort = sortValue || ($('sortSel') ? $('sortSel').value : 'prodRate');
+  if (sort === 'prodRate') return { label:'差異來自', type:'source' };
+  if (['scrapAmt','scrapRate','overuseAmt','overuseAmtB','overuseRate'].includes(sort)) return { label:'超用來自', type:'source' };
+  return null;
+}
+
 function fmtMayGroupCell(row, col){
   const v = row[col.field];
   if (col.type === 'rate') return v == null ? '—' : fmtPct(v);
