@@ -6,6 +6,35 @@
   <title>晉欣鮮食廠｜半成品儀表板</title>
   <link rel="icon" href="data:," />
 
+<script>
+(function(){
+  function addStyle(){
+    if (document.getElementById('loadProgressStyle')) return;
+    var style = document.createElement('style');
+    style.id = 'loadProgressStyle';
+    style.textContent = '#dataStatus.load-status-chip{display:inline-flex;align-items:center;gap:10px;min-height:34px;white-space:nowrap}.status-spinner{width:14px;height:14px;border:2px solid #dbeafe;border-top-color:#60a5fa;border-radius:999px;animation:statusSpin .8s linear infinite;display:inline-block;flex:0 0 auto}@keyframes statusSpin{to{transform:rotate(360deg)}}.status-bgbar{display:inline-flex;align-items:center;gap:10px;min-width:260px}.status-bgbar-track{width:150px;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;border:1px solid #bfdbfe}.status-bgbar-fill{height:100%;width:0%;background:#93c5fd;border-radius:999px;transition:width .25s ease}.status-bgbar-text{font-size:12px;color:#64748b}@media (max-width:640px){.status-bgbar{min-width:190px}.status-bgbar-track{width:90px}}';
+    (document.head || document.documentElement).appendChild(style);
+  }
+  function chip(html){
+    addStyle();
+    var el = document.getElementById('dataStatus');
+    if (!el) return;
+    el.classList.add('load-status-chip');
+    el.innerHTML = html;
+  }
+  function clamp(v){ v=Number(v); if(!isFinite(v)) v=0; return Math.max(0,Math.min(100,v)); }
+  window.setCircularLoadProgress = window.setCircularLoadProgress || function(v){
+    var pct = clamp(v);
+    chip(pct >= 100 ? '<span>已優先載入近三個月資料</span>' : '<span class="status-spinner" aria-hidden="true"></span><span>預先載入近三個月資料中</span>');
+  };
+  window.setBackgroundBarProgress = window.setBackgroundBarProgress || function(done,total){
+    var t=Number(total)||0, d=Number(done)||0, pct=t>0?clamp(d/t*100):100;
+    chip('<span class="status-bgbar"><span class="status-bgbar-track"><span class="status-bgbar-fill" style="width:'+pct.toFixed(1)+'%"></span></span><span class="status-bgbar-text">其他月份背景載入中 '+Math.round(pct)+'%</span></span>');
+  };
+})();
+</script>
+
+
   <!-- Tailwind CSS (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -971,6 +1000,70 @@ const toast = (msg) => {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.style.display = 'none', 3000);
 };
+
+
+// =========================
+// Loading progress UI
+// - Initial recent 3 months: compact circular spinner chip
+// - Background remaining months: compact light-blue bar chip
+// =========================
+function ensureLoadProgressUI(){
+  if (document.getElementById('loadProgressStyle')) return;
+  const style = document.createElement('style');
+  style.id = 'loadProgressStyle';
+  style.textContent = `
+    #dataStatus.load-status-chip{display:inline-flex;align-items:center;gap:10px;min-height:34px;white-space:nowrap;}
+    .status-spinner{width:14px;height:14px;border:2px solid #dbeafe;border-top-color:#60a5fa;border-radius:999px;animation:statusSpin .8s linear infinite;display:inline-block;flex:0 0 auto;}
+    @keyframes statusSpin{to{transform:rotate(360deg)}}
+    .status-bgbar{display:inline-flex;align-items:center;gap:10px;min-width:260px;}
+    .status-bgbar-track{width:150px;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;border:1px solid #bfdbfe;}
+    .status-bgbar-fill{height:100%;width:0%;background:#93c5fd;border-radius:999px;transition:width .25s ease;}
+    .status-bgbar-text{font-size:12px;color:#64748b;}
+    @media (max-width:640px){.status-bgbar{min-width:190px}.status-bgbar-track{width:90px}}
+  `;
+  document.head.appendChild(style);
+}
+function clampProgressValue(v){
+  v = Number(v);
+  if (!Number.isFinite(v)) v = 0;
+  return Math.max(0, Math.min(100, v));
+}
+function setStatusChipHTML(html){
+  ensureLoadProgressUI();
+  const el = document.getElementById('dataStatus');
+  if (!el) return;
+  el.classList.add('load-status-chip');
+  el.innerHTML = html;
+}
+function setCircularLoadProgress(value, message){
+  const pct = clampProgressValue(value);
+  const done = pct >= 100;
+  if (done) {
+    setStatusChipHTML(`<span>已優先載入近三個月資料</span>`);
+    return;
+  }
+  setStatusChipHTML(`<span class="status-spinner" aria-hidden="true"></span><span>預先載入近三個月資料中</span>`);
+}
+function setBackgroundBarProgress(done, total, message){
+  const t = Number(total) || 0;
+  const d = Number(done) || 0;
+  const pct = t > 0 ? clampProgressValue((d / t) * 100) : 100;
+  setStatusChipHTML(`
+    <span class="status-bgbar">
+      <span class="status-bgbar-track"><span class="status-bgbar-fill" style="width:${pct.toFixed(1)}%"></span></span>
+      <span class="status-bgbar-text">其他月份背景載入中 ${Math.round(pct)}%</span>
+    </span>
+  `);
+  if (t > 0 && d >= t) {
+    clearTimeout(setBackgroundBarProgress._hideTimer);
+    setBackgroundBarProgress._hideTimer = setTimeout(()=>{
+      const el = document.getElementById('dataStatus');
+      if (el) el.textContent = '資料已載入';
+    }, 2200);
+  }
+}
+window.setCircularLoadProgress = setCircularLoadProgress;
+window.setBackgroundBarProgress = setBackgroundBarProgress;
 
 
 // --- date/string helpers (避免 null.localeCompare、parseISO 未定義而中斷) ---
