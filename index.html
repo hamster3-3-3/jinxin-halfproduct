@@ -12,7 +12,7 @@
     if (document.getElementById('loadProgressStyle')) return;
     var style = document.createElement('style');
     style.id = 'loadProgressStyle';
-    style.textContent = '#dataStatus.load-status-chip{display:inline-flex;align-items:center;gap:10px;min-height:34px;white-space:nowrap}.status-spinner{width:14px;height:14px;border:2px solid #dbeafe;border-top-color:#60a5fa;border-radius:999px;animation:statusSpin .8s linear infinite;display:inline-block;flex:0 0 auto}@keyframes statusSpin{to{transform:rotate(360deg)}}.status-bgbar{display:inline-flex;align-items:center;gap:10px;min-width:260px}.status-bgbar-track{width:150px;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;border:1px solid #bfdbfe}.status-bgbar-fill{height:100%;width:0%;background:#93c5fd;border-radius:999px;transition:width .25s ease}.status-bgbar-text{font-size:12px;color:#64748b}@media (max-width:640px){.status-bgbar{min-width:190px}.status-bgbar-track{width:90px}}';
+    style.textContent = "#dataStatus.load-status-chip{display:inline-flex;align-items:center;gap:10px;min-height:34px;white-space:nowrap}.status-circle{--p:0;position:relative;width:16px;height:16px;border-radius:999px;background:conic-gradient(#60a5fa calc(var(--p)*1%),#dbeafe 0);display:inline-block;flex:0 0 auto;transition:background .25s ease}.status-circle::after{content:'';position:absolute;inset:4px;background:#fff;border-radius:999px}.status-circle.done{background:conic-gradient(#2563eb 100%,#dbeafe 0)}.status-bgbar{display:inline-flex;align-items:center;gap:10px;min-width:260px}.status-bgbar-track{width:150px;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;border:1px solid #bfdbfe}.status-bgbar-fill{height:100%;width:0%;background:#93c5fd;border-radius:999px;transition:width .25s ease}.status-bgbar-text{font-size:12px;color:#64748b}.status-preload-text{font-size:12px;color:#64748b}@media (max-width:640px){.status-bgbar{min-width:190px}.status-bgbar-track{width:90px}}";
     (document.head || document.documentElement).appendChild(style);
   }
   function chip(html){
@@ -23,9 +23,11 @@
     el.innerHTML = html;
   }
   function clamp(v){ v=Number(v); if(!isFinite(v)) v=0; return Math.max(0,Math.min(100,v)); }
-  window.setCircularLoadProgress = window.setCircularLoadProgress || function(v){
+  window.setCircularLoadProgress = window.setCircularLoadProgress || function(v, message){
     var pct = clamp(v);
-    chip(pct >= 100 ? '<span>已優先載入近三個月資料</span>' : '<span class="status-spinner" aria-hidden="true"></span><span>預先載入近三個月資料中</span>');
+    var done = pct >= 100;
+    var msg = message || (done ? '已優先載入近三個月資料' : '預先載入近三個月資料中');
+    chip('<span class="status-circle '+(done?'done':'')+'" style="--p:'+pct.toFixed(1)+'" aria-hidden="true"></span><span class="status-preload-text">'+msg+'</span>');
   };
   window.setBackgroundBarProgress = window.setBackgroundBarProgress || function(done,total){
     var t=Number(total)||0, d=Number(done)||0, pct=t>0?clamp(d/t*100):100;
@@ -1004,7 +1006,7 @@ const toast = (msg) => {
 
 // =========================
 // Loading progress UI
-// - Initial recent 3 months: compact circular spinner chip
+// - Initial recent 3 months: compact determinate circular progress chip
 // - Background remaining months: compact light-blue bar chip
 // =========================
 function ensureLoadProgressUI(){
@@ -1013,8 +1015,10 @@ function ensureLoadProgressUI(){
   style.id = 'loadProgressStyle';
   style.textContent = `
     #dataStatus.load-status-chip{display:inline-flex;align-items:center;gap:10px;min-height:34px;white-space:nowrap;}
-    .status-spinner{width:14px;height:14px;border:2px solid #dbeafe;border-top-color:#60a5fa;border-radius:999px;animation:statusSpin .8s linear infinite;display:inline-block;flex:0 0 auto;}
-    @keyframes statusSpin{to{transform:rotate(360deg)}}
+    .status-circle{--p:0;position:relative;width:16px;height:16px;border-radius:999px;background:conic-gradient(#60a5fa calc(var(--p) * 1%), #dbeafe 0);display:inline-block;flex:0 0 auto;transition:background .25s ease;}
+    .status-circle::after{content:'';position:absolute;inset:4px;background:#fff;border-radius:999px;}
+    .status-circle.done{background:conic-gradient(#2563eb 100%, #dbeafe 0);}
+    .status-preload-text{font-size:12px;color:#64748b;}
     .status-bgbar{display:inline-flex;align-items:center;gap:10px;min-width:260px;}
     .status-bgbar-track{width:150px;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;border:1px solid #bfdbfe;}
     .status-bgbar-fill{height:100%;width:0%;background:#93c5fd;border-radius:999px;transition:width .25s ease;}
@@ -1038,11 +1042,8 @@ function setStatusChipHTML(html){
 function setCircularLoadProgress(value, message){
   const pct = clampProgressValue(value);
   const done = pct >= 100;
-  if (done) {
-    setStatusChipHTML(`<span>已優先載入近三個月資料</span>`);
-    return;
-  }
-  setStatusChipHTML(`<span class="status-spinner" aria-hidden="true"></span><span>預先載入近三個月資料中</span>`);
+  const msg = message || (done ? '已優先載入近三個月資料' : '預先載入近三個月資料中');
+  setStatusChipHTML(`<span class="status-circle ${done ? 'done' : ''}" style="--p:${pct.toFixed(1)}" aria-hidden="true"></span><span class="status-preload-text">${escapeHTML(String(msg))}</span>`);
 }
 function setBackgroundBarProgress(done, total, message){
   const t = Number(total) || 0;
