@@ -488,7 +488,7 @@ function monthKeyFromISO(iso){
     </div>
 
     <!-- KPI cards -->
-    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
       <div class="card p-4">
         <div class="kpi-card-title">營業額</div>
         <div id="kpiSales" class="kpi-card-value mono mt-1">—</div>
@@ -500,65 +500,37 @@ function monthKeyFromISO(iso){
       <div class="card p-4">
         <div class="kpi-card-title">報廢率</div>
         <div id="kpiScrapRate" class="kpi-card-value mono mt-1">—</div>
-</div>
-      <div class="card p-4">
-        <div class="kpi-card-title">超用額</div>
+</div>      <div class="card p-4">
+        <div id="kpiOverAmtLabel" class="kpi-card-title">超用金額(多展-報廢)</div>
         <div id="kpiOverAmt" class="kpi-card-value mono mt-1">—</div>
+</div>
+      <div id="kpiOverAmtBCard" class="card p-4 hidden">
+        <div id="kpiOverAmtBLabel" class="kpi-card-title">超用金額B(多展-報廢)</div>
+        <div id="kpiOverAmtB" class="kpi-card-value mono mt-1">—</div>
 </div>
       <div class="card p-4">
         <div class="kpi-card-title">超用率</div>
         <div id="kpiOverRate" class="kpi-card-value mono mt-1">—</div>
 </div>
     </div>
-
-    <!-- Top cards -->
-    <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
-      <div class="card p-4">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <div class="kpi-card-title">廢棄前10名</div>
-            <div id="topScrapAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比：<span id="topScrapShare" class="mono">—</span></div>
-          </div>
-          
-        </div>
-      </div>
-
-      <div class="card p-4">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <div class="kpi-card-title">超用前10名</div>
-            <div id="topOverAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1">構成比：<span id="topOverShare" class="mono">—</span></div>
-          </div>
-          
-        </div>
-      </div>
-
-      <div class="card p-4">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <div class="kpi-card-title">共用類廢棄</div>
-            <div id="sharedAmt" class="kpi-card-value mono mt-1">—</div>
-            <div class="subval mt-1 flex items-center gap-2">
-              構成比（KPI 15%）：<span id="sharedShare" class="mono">—</span>
-              <span id="sharedBadge" class="hidden"></span>
-            </div>
-          </div>
-          
-        </div>
-      </div>
+    <!-- Top cards removed per request: keep hidden placeholders so existing JavaScript can update values without rendering the cards. -->
+    <div class="hidden" aria-hidden="true">
+      <span id="topScrapAmt"></span>
+      <span id="topScrapShare"></span>
+      <span id="topOverAmt"></span>
+      <span id="topOverShare"></span>
+      <span id="sharedAmt"></span>
+      <span id="sharedShare"></span>
+      <span id="sharedBadge"></span>
     </div>
 
     <!-- Charts -->
-    <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <div class="mt-4 grid grid-cols-1 gap-3">
       <div class="card p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-sm font-semibold">KPI 趨勢圖</div>
-            
           </div>
-          
           <div class="flex flex-wrap gap-2 items-center" id="kpiSingleWrap">
             <button class="seg-btn active" type="button" data-kpi-single="sales">營業額</button>
             <button class="seg-btn" type="button" data-kpi-single="scrapAmt">報廢額</button>
@@ -567,34 +539,20 @@ function monthKeyFromISO(iso){
             <button class="seg-btn" type="button" data-kpi-single="overuseRate">超用率</button>
           </div>
         </div>
-        <div class="mt-3">
-          <canvas id="kpiChart" height="220"></canvas>
+        <div class="mt-3 h-[340px]">
+          <canvas id="kpiChart" height="340" style="height:340px;"></canvas>
         </div>
       </div>
+    </div>
 
-      <div class="card p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-semibold">廢棄／超用 趨勢圖</div>
-            
-          </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <div class="flex flex-wrap gap-2 items-center">
-              <button class="seg-btn active" data-right="scrapTop10">廢棄前10名</button>
-              <button class="seg-btn" data-right="overTop10">超用前10名</button>
-              <button class="seg-btn" data-right="shared">共用類廢棄</button>
-            </div>
-            <div class="h-6 w-px bg-slate-200 mx-1"></div>
-            <div class="flex flex-wrap gap-2 items-center">
-              <button class="seg-btn active" data-right-metric="amt">金額</button>
-              <button class="seg-btn" data-right-metric="share">構成比</button>
-            </div>
-          </div>
-        </div>
-        <div class="mt-3">
-          <canvas id="rightChart" height="220"></canvas>
-        </div>
-      </div>
+    <!-- 廢棄／超用趨勢圖已移除；保留隱藏元件供既有 JavaScript 更新狀態，避免缺少 DOM 節點。 -->
+    <div class="hidden" aria-hidden="true">
+      <button class="seg-btn active" type="button" data-right="scrapTop10">廢棄前10名</button>
+      <button class="seg-btn" type="button" data-right="overTop10">超用前10名</button>
+      <button class="seg-btn" type="button" data-right="shared">共用類廢棄</button>
+      <button class="seg-btn active" type="button" data-right-metric="amt">金額</button>
+      <button class="seg-btn" type="button" data-right-metric="share">構成比</button>
+      <canvas id="rightChart" height="1"></canvas>
     </div>
 
 
@@ -772,6 +730,7 @@ function monthKeyFromISO(iso){
               <option value="scrapAmt">報廢金額（高→低）</option>
               <option value="scrapRate">報廢率（高→低）</option>
               <option value="overuseAmt">超用金額（高→低）</option>
+              <option value="overuseAmtB">超用金額B（高→低）</option>
               <option value="overuseRate">超用率（高→低）</option>
               <option value="refillQty">補單量（高→低）</option>
               <option value="refillRate">補單率（高→低）</option>
@@ -814,7 +773,7 @@ function monthKeyFromISO(iso){
                   <th class="text-right">實際生產率</th>
                   <th id="groupDiffHeader" class="text-right">差異金額</th>
                   <th id="groupScrapHeader" class="text-right">報廢金額</th>
-                  <th id="groupOveruseHeader" class="text-right">超用金額</th>
+                  <th id="groupOveruseHeader" class="text-right">超用金額(多展-報廢)</th>
                 </tr>
               </thead>
               <tbody id="groupTbody"></tbody>
@@ -1665,31 +1624,49 @@ function parseSummaryFromWB(wb, fileName) {
   const idxSharedShare = findGroupSub('共用類廢棄', '構成比');
 
   const out = [];
+  const fileStart = parseFileStartFromName(fileName);
+  const fileSpan = parseFileSpanFromName(fileName);
+  const fileSpanStartISO = fileSpan ? toISO(fileSpan.start) : null;
+  const fileSpanEndISO = fileSpan ? toISO(fileSpan.end) : null;
+
   for (let r=hRow+2;r<rows.length;r++) { // hRow+1 為子表頭
     const row = rows[r];
     const d = parseMaybeDate(row[idxDate]);
     if (!d) continue;
 
+    const dateISO = toISO(d);
+    const sales = asNumber(row[idxSales]);
+    const scrapAmt = asNumber(row[idxScrapAmt]);
+    const scrapRate = asNumber(row[idxScrapRate]);
+    const overuseAmt = asNumber(row[idxOverAmt]);
+    const overuseRate = asNumber(row[idxOverRate]);
+
+    // 月初檔案常會在「日別報廢率總表」保留上一週/上月的日期列，
+    // 但營業額、報廢、超用為空；跨月週別若載入兩份檔案，這些空白列會覆蓋前一月真實數據。
+    // 因此日別 KPI 僅採用檔名涵蓋期間內的列；例如 2026-0601-0622 檔只保留 6/1 之後，
+    // 5/26~5/31 則由 2026-0501-0531 檔提供。
+    const outsideFileSpan = fileSpanStartISO && fileSpanEndISO && (dateISO < fileSpanStartISO || dateISO > fileSpanEndISO);
+    const hasCoreKpi = [sales, scrapAmt, overuseAmt].some(v => Number.isFinite(v) && Math.abs(v) > 0);
+    if (outsideFileSpan && !hasCoreKpi) continue;
+
     out.push({
-      date: toISO(d),
-      sales: Number(row[idxSales] ?? 0) || 0,
-      scrapAmt: Number(row[idxScrapAmt] ?? 0) || 0,
-      scrapRate: Number(row[idxScrapRate] ?? 0) || 0,
-      overuseAmt: Number(row[idxOverAmt] ?? 0) || 0,
-      overuseRate: Number(row[idxOverRate] ?? 0) || 0,
-      topScrapAmt: Number(row[idxTopScrapAmt] ?? 0) || 0,
-      topScrapShare: Number(row[idxTopScrapShare] ?? 0) || 0,
-      topOverAmt: Number(row[idxTopOverAmt] ?? 0) || 0,
-      topOverShare: Number(row[idxTopOverShare] ?? 0) || 0,
-      sharedAmt: Number(row[idxSharedAmt] ?? 0) || 0,
-      sharedShare: Number(row[idxSharedShare] ?? 0) || 0,
+      date: dateISO,
+      sales: Number.isFinite(sales) ? sales : 0,
+      scrapAmt: Number.isFinite(scrapAmt) ? scrapAmt : 0,
+      scrapRate: Number.isFinite(scrapRate) ? scrapRate : 0,
+      overuseAmt: Number.isFinite(overuseAmt) ? overuseAmt : 0,
+      overuseRate: Number.isFinite(overuseRate) ? overuseRate : 0,
+      topScrapAmt: asNumber(row[idxTopScrapAmt]) || 0,
+      topScrapShare: asNumber(row[idxTopScrapShare]) || 0,
+      topOverAmt: asNumber(row[idxTopOverAmt]) || 0,
+      topOverShare: asNumber(row[idxTopOverShare]) || 0,
+      sharedAmt: asNumber(row[idxSharedAmt]) || 0,
+      sharedShare: asNumber(row[idxSharedShare]) || 0,
     });
   }
   
   // 有些檔案的「日別報廢率總表」日期欄可能仍保留上月快取（例如 11 月檔案顯示 10 月日期）
   // 以檔名的起始年月作為參照，若主體年月不一致，則整體平移月份，避免月份缺漏（例如缺少 11 月）。
-  const fileStart = parseFileStartFromName(fileName);
-  const fileSpan = parseFileSpanFromName(fileName);
   if (fileStart && out.length) {
     const expYM = toISO(fileStart).slice(0,7);
     const coveredMonths = fileSpan ? monthKeysBetween(toISO(fileSpan.start), toISO(fileSpan.end)) : [expYM];
@@ -2861,7 +2838,17 @@ function computeNeededMonthKeysFromUI(){
   if (mode === 'week') {
     const ws = $('weekSel') ? $('weekSel').value : state.selection.weekStart;
     const w = (state.weeks || []).find(x => x.start === ws);
-    return w ? monthKeysBetween(w.start, w.end) : ((y && m) ? [`${y}-${m}`] : []);
+    if (w && w.start && w.end) return monthKeysBetween(w.start, w.end);
+
+    // 週別下拉有時只保存起始日；跨月週別不能退回只載入 monthSel，
+    // 必須直接用週起始日 + 6 天推算完整期間，確保 05/26~06/01 會同時載入 5 月與 6 月檔案。
+    const ds = parseISO(ws);
+    if (ds instanceof Date && !isNaN(ds)) {
+      const startISO = toISO(ds);
+      const endISO = toISO(addDays(ds, 6));
+      return monthKeysBetween(startISO, endISO);
+    }
+    return (y && m) ? [`${y}-${m}`] : [];
   }
   if (mode === 'day') {
     const d = $('daySel') ? $('daySel').value : state.selection.day;
@@ -2889,6 +2876,46 @@ function getRecentMonthKeysFromManifest(count=3){
   return sorted.slice(Math.max(0, sorted.length - count));
 }
 
+
+
+function getAllMonthKeysFromManifest(){
+  const keys = new Set();
+  for (const fp of (state.manifestFiles || [])) {
+    for (const mk of getFileMonthCoverage(fp)) {
+      if (/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(mk || ''))) keys.add(mk);
+    }
+  }
+  return Array.from(keys).sort();
+}
+
+function startBackgroundLoadRemainingMonths(){
+  if (state._backgroundMonthLoading) return;
+  const allMonthKeys = getAllMonthKeysFromManifest();
+  const remaining = allMonthKeys.filter(mk => !state.loadedMonthKeys.has(mk));
+  if (!remaining.length) return;
+
+  state._backgroundMonthLoading = true;
+  (async () => {
+    for (const mk of remaining) {
+      if (state.loadedMonthKeys.has(mk)) continue;
+      try {
+        await ensureDataForMonthKeys([mk], {background:true});
+      } catch (e) {
+        console.warn('背景月份載入失敗：' + mk, e);
+      }
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    state._backgroundMonthLoading = false;
+    const el = $('dataStatus');
+    if (el) {
+      const failCount = Array.isArray(state.loadErrors) ? state.loadErrors.length : 0;
+      el.textContent = failCount
+        ? `背景載入完成（已載入 ${state.loadedMonthKeys.size} 個月份，部分檔案失敗 ${failCount}）`
+        : `已完成所有月份背景載入（${state.loadedMonthKeys.size} 個月份）`;
+    }
+  })();
+}
+
 function setDefaultSelectionToLatestLoadedMonth(monthKeys){
   const latest = (monthKeys || []).filter(Boolean).sort().at(-1);
   if (!latest) return;
@@ -2909,9 +2936,42 @@ function setDefaultSelectionToLatestLoadedMonth(monthKeys){
   state.selection.end = toISO(new Date(yy, mo, 0));
 }
 
+function summaryCompletenessScore(r){
+  if (!r) return -1;
+  const core = ['sales','scrapAmt','scrapRate','overuseAmt','overuseRate'];
+  return core.reduce((score, k) => {
+    const v = Number(r[k]);
+    return score + (Number.isFinite(v) && Math.abs(v) > 0 ? 1 : 0);
+  }, 0);
+}
+
+function mergeSummaryRows(oldRow, newRow){
+  if (!oldRow) return newRow;
+  if (!newRow) return oldRow;
+
+  // 同一日期可能同時存在於「5 月檔」與「6 月檔」。
+  // 若後載入的是月初檔保留的上月空白列，不可覆蓋已解析出的真實營業額/報廢/超用。
+  const oldScore = summaryCompletenessScore(oldRow);
+  const newScore = summaryCompletenessScore(newRow);
+  if (newScore > oldScore) return Object.assign({}, oldRow, newRow);
+  if (newScore < oldScore) return oldRow;
+
+  const merged = Object.assign({}, oldRow);
+  for (const [k, v] of Object.entries(newRow)){
+    if (k === 'date') continue;
+    const nv = Number(v);
+    const ov = Number(merged[k]);
+    if ((!Number.isFinite(ov) || Math.abs(ov) === 0) && Number.isFinite(nv) && Math.abs(nv) > 0) merged[k] = v;
+  }
+  return merged;
+}
+
 function dedupeLoadedData(){
   const sm = new Map();
-  for (const r of (state.summary||[])) sm.set(r.date, r);
+  for (const r of (state.summary||[])) {
+    if (!r || !r.date) continue;
+    sm.set(r.date, mergeSummaryRows(sm.get(r.date), r));
+  }
   state.summary = Array.from(sm.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
   state.details = (state.details||[]).sort((a,b)=>safeLocaleCompare(a.date,b.date));
@@ -2926,7 +2986,8 @@ function dedupeLoadedData(){
   state.top20Entries = state.top20Entries || [];
 }
 
-async function ensureDataForMonthKeys(monthKeys){
+async function ensureDataForMonthKeys(monthKeys, options={}){
+  const silent = !!(options && options.background);
   const need = Array.from(new Set((monthKeys||[]).filter(Boolean))).filter(mk => !state.loadedMonthKeys.has(mk));
   if (!need.length) return;
 
@@ -2936,8 +2997,10 @@ async function ensureDataForMonthKeys(monthKeys){
     return;
   }
 
-  $('dataStatus').innerHTML = `<span class="loader"></span> 載入資料中（${need.join(', ')}）...`;
-  $('dataStatus').classList.add('chip');
+  if (!silent) {
+    $('dataStatus').innerHTML = `<span class="loader"></span> 載入資料中（${need.join(', ')}）...`;
+    $('dataStatus').classList.add('chip');
+  }
 
   const loadErrors = [];
   let sum = [];
@@ -2980,10 +3043,12 @@ async function ensureDataForMonthKeys(monthKeys){
   need.forEach(mk => state.loadedMonthKeys.add(mk));
   state.loadErrors = Array.from(new Set((state.loadErrors || []).concat(loadErrors)));
 
-  if (loadErrors.length) {
-    $('dataStatus').textContent = `資料已載入（部分失敗 ${loadErrors.length}）`;
-  } else {
-    $('dataStatus').textContent = `資料已載入（${state.loadedMonthKeys.size} 個月份）`;
+  if (!silent) {
+    if (loadErrors.length) {
+      $('dataStatus').textContent = `資料已載入（部分失敗 ${loadErrors.length}）`;
+    } else {
+      $('dataStatus').textContent = `資料已載入（${state.loadedMonthKeys.size} 個月份）`;
+    }
   }
 }
 
@@ -3550,12 +3615,18 @@ function augmentSummaryRowsWithDetails(srows, drows){
   return Array.from(merged.values()).sort((a,b) => safeLocaleCompare(a.date, b.date));
 }
 
+function shouldUsePostMayOveruseLayout(rows){
+  return isMay2026OrLaterRange() || !!state._forceMayGroupLayout || (Array.isArray(rows) && rows.some(r => safeStr(r && r.date) >= '2026-05-01'));
+}
+
 function updateKPICards(srows) {
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
 
   const totalSales = sum('sales');
   const totalScrapAmt = sum('scrapAmt');
   const totalOverAmt = sum('overuseAmt');
+  const totalOverAmtB = totalOverAmt - totalScrapAmt;
+  const usePostMay = shouldUsePostMayOveruseLayout(srows);
 
   // 以區間加總後重新計算「整段期間」的比率（避免直接加總每日百分比）
   const scrapRate = (Number.isFinite(totalSales) && totalSales > 0) ? (totalScrapAmt / totalSales) : NaN;
@@ -3566,6 +3637,13 @@ function updateKPICards(srows) {
   $('kpiScrapRate').textContent = fmtPct(scrapRate);
   $('kpiOverAmt').textContent = fmtMoney(totalOverAmt);
   $('kpiOverRate').textContent = fmtPct(overRate);
+
+  const overAmtLabel = $('kpiOverAmtLabel');
+  const overAmtBCard = $('kpiOverAmtBCard');
+  const overAmtB = $('kpiOverAmtB');
+  if (overAmtLabel) overAmtLabel.textContent = usePostMay ? '超用金額A(多展)' : '超用金額(多展-報廢)';
+  if (overAmtBCard) overAmtBCard.classList.toggle('hidden', !usePostMay);
+  if (overAmtB) overAmtB.textContent = fmtMoney(totalOverAmtB);
 
   // Top cards：金額用「加總」，構成比用「加總後再計算」(以分母加總權重)
   const totalTopScrapAmt = sum('topScrapAmt');
@@ -3983,6 +4061,8 @@ function aggregateGroups(drows) {
     o.actualRate = o.hasNewDetail ? (o.order > 0 ? (o.actualQty / o.order) : (o.actualRateDenom > 0 ? (o.actualRateNumer / o.actualRateDenom) : null)) : null;
     o.refillRateNew = o.hasNewDetail ? (o.order > 0 ? (o.refillQtyNew / o.order) : (o.refillRateDenom > 0 ? (o.refillRateNumer / o.refillRateDenom) : null)) : null;
     o.unitPrice = o.unitPriceN ? (o.unitPriceSum / o.unitPriceN) : null;
+    o.overuseAmtA = Number(o.overuseAmt) || 0;
+    o.overuseAmtB = (Number(o.overuseAmt) || 0) - (Number(o.scrapAmt) || 0);
   }
   return out;
 }
@@ -4021,49 +4101,46 @@ function getMayGroupColumns(sortValue){
       { label:'報廢金額', field:'scrapAmt', type:'money' }
     ];
   }
-  if (sort === 'overuseAmt' || sort === 'overuseRate') {
+  if (sort === 'overuseAmt' || sort === 'overuseAmtB' || sort === 'overuseRate') {
     return [
       { label:'超用數', field:'overuseQty', type:'qty' },
       { label:'超用率', field:'overuseRate', type:'rate' },
-      { label:'超用金額', field:'overuseAmt', type:'money' }
+      { label:'超用金額A(多展)', field:'overuseAmtA', type:'money' },
+      { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
     ];
   }
   if (sort === 'expandRate') {
     return [
       { label:'生管展開量', field:'expandQty', type:'qty' },
       { label:'生管展開率', field:'expandRate', type:'rate' },
-      { label:'超用金額', field:'overuseAmt', type:'money' }
+      { label:'超用金額A(多展)', field:'overuseAmtA', type:'money' },
+      { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
     ];
   }
   if (sort === 'actualRate') {
     return [
       { label:'生產實際產出量', field:'actualQty', type:'qty' },
       { label:'生產實際產出率', field:'actualRate', type:'rate' },
-      { label:'超用金額', field:'overuseAmt', type:'money' }
+      { label:'超用金額A(多展)', field:'overuseAmtA', type:'money' },
+      { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
     ];
   }
   if (sort === 'refillQty' || sort === 'refillRate') {
     return [
       { label:'生產補單量', field:'refillQtyNew', type:'qty' },
       { label:'生產補單率', field:'refillRateNew', type:'rate' },
-      { label:'超用金額', field:'overuseAmt', type:'money' }
+      { label:'超用金額A(多展)', field:'overuseAmtA', type:'money' },
+      { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
     ];
   }
   // prodRate = 總產出率
   return [
     { label:'總產出量', field:'output', type:'qty' },
     { label:'總產出率', field:'prodRate', type:'rate' },
-    { label:'超用金額', field:'overuseAmt', type:'money' }
+    { label:'超用金額A(多展)', field:'overuseAmtA', type:'money' },
+    { label:'超用金額B(多展-報廢)', field:'overuseAmtB', type:'money' }
   ];
 }
-
-function getMayGroupSourceColumn(sortValue){
-  const sort = sortValue || ($('sortSel') ? $('sortSel').value : 'prodRate');
-  if (sort === 'prodRate') return { label:'差異來自', type:'source' };
-  if (['scrapAmt','scrapRate','overuseAmt','overuseRate'].includes(sort)) return { label:'超用來自', type:'source' };
-  return null;
-}
-
 function fmtMayGroupCell(row, col){
   const v = row[col.field];
   if (col.type === 'rate') return v == null ? '—' : fmtPct(v);
@@ -4072,7 +4149,7 @@ function fmtMayGroupCell(row, col){
 }
 
 function buildGroupHeaderHTML(){
-  const isNew = isMay2026OrLaterRange();
+  const isNew = isMay2026OrLaterRange() || !!state._forceMayGroupLayout;
   if (isNew) {
     const cols = getMayGroupColumns();
     const sourceCol = getMayGroupSourceColumn();
@@ -4095,12 +4172,12 @@ function buildGroupHeaderHTML(){
     <th class="text-right">實際生產率</th>
     <th id="groupDiffHeader" class="text-right">${isRate ? '差異率' : '差異金額'}</th>
     <th id="groupScrapHeader" class="text-right">${isRate ? '報廢率' : '報廢金額'}</th>
-    <th id="groupOveruseHeader" class="text-right">${isRate ? '超用率' : '超用金額'}</th>
+    <th id="groupOveruseHeader" class="text-right">${isRate ? '超用率' : '超用金額(多展-報廢)'}</th>
   `;
 }
 
 function syncMayGroupColumnsAndSort(){
-  const isNew = isMay2026OrLaterRange();
+  const isNew = isMay2026OrLaterRange() || !!state._forceMayGroupLayout;
   state._useMayGroupLayout = isNew;
   state._hideGroupDiffColumns = isNew;
 
@@ -4120,11 +4197,24 @@ function syncMayGroupColumnsAndSort(){
       opt.style.display = !isNew ? 'none' : '';
     });
 
+
+    const overAOpt = sel.querySelector('option[value="overuseAmt"]');
+    if (overAOpt) overAOpt.textContent = isNew ? '超用金額A（高→低）' : '超用金額(多展-報廢)（高→低）';
+    const overBOpt = sel.querySelector('option[value="overuseAmtB"]');
+    if (overBOpt) {
+      overBOpt.disabled = !isNew;
+      overBOpt.hidden = !isNew;
+      overBOpt.style.display = !isNew ? 'none' : '';
+    }
+
     const prodOpt = sel.querySelector('option[value="prodRate"]');
     if (prodOpt) prodOpt.textContent = isNew ? '總產出率（高→低）' : '實際生產率（高→低）';
 
     if (isNew && (sel.value === 'diffAmt' || sel.value === 'diffRate')) {
       sel.value = 'prodRate';
+    }
+    if (!isNew && sel.value === 'overuseAmtB') {
+      sel.value = 'overuseAmt';
     }
     if (!isNew && (sel.value === 'expandRate' || sel.value === 'actualRate' || sel.value === 'refillRate')) {
       sel.value = 'prodRate';
@@ -4155,6 +4245,8 @@ function applyGroupFilterAndRender(drows) {
     state.groupRows = aggregateGroups(drows);
     state._groupRangeKey = rangeKey;
   }
+
+  state._forceMayGroupLayout = isMay2026OrLaterRange() || (Array.isArray(drows) && drows.some(r => safeStr(r.date) >= '2026-05-01'));
 
   syncGroupQtyRateHeaders();
 
@@ -4189,7 +4281,8 @@ function applyGroupFilterAndRender(drows) {
   if (sort === 'actualRate') filtered.sort(byNullable('actualRate'));
   if (sort === 'scrapAmt') filtered.sort(by('scrapAmt'));
   if (sort === 'scrapRate') filtered.sort(byNullable('scrapRate'));
-  if (sort === 'overuseAmt') filtered.sort(by('overuseAmt'));
+  if (sort === 'overuseAmt') filtered.sort(by('overuseAmtA'));
+  if (sort === 'overuseAmtB') filtered.sort(by('overuseAmtB'));
   if (sort === 'overuseRate') filtered.sort(byNullable('overuseRate'));
   if (sort === 'refillQty') filtered.sort(isNewLayout ? by('refillQtyNew') : by('refillQty'));
   if (sort === 'refillRate') filtered.sort(byNullable('refillRateNew'));
@@ -5856,6 +5949,7 @@ async function init(force=false) {
     // 上市日期完整索引延後背景補載，不阻塞主畫面
     Promise.resolve(state.launchPromise).then(()=>{ try{ renderAll(); if (state.selectedKey) renderSelectedItem(); }catch(e){} }).catch(()=>{});
     state.loaded = true;
+    startBackgroundLoadRemainingMonths();
   } catch (e) {
     console.error(e);
     const failed = Array.isArray(state.loadErrors) && state.loadErrors.length
