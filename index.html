@@ -411,6 +411,58 @@ function monthKeyFromISO(iso){
   .sticky-pane{position:sticky;top:12px;z-index:40;}
 .sticky-pane.is-stuck{box-shadow:0 12px 30px rgba(15,23,42,.12);}
 @media (max-width:640px){.sticky-pane{top:8px;}}
+
+    .load-progress-wrap {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      white-space:nowrap;
+    }
+    .progress-circle {
+      --p: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: conic-gradient(#0f172a calc(var(--p) * 1%), #e2e8f0 0);
+      position: relative;
+      flex: 0 0 auto;
+    }
+    .progress-circle::before {
+      content:"";
+      position:absolute;
+      inset:4px;
+      border-radius:999px;
+      background:#fff;
+    }
+    .progress-circle-text {
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:9px;
+      font-weight:700;
+      color:#0f172a;
+      z-index:1;
+      font-variant-numeric: tabular-nums;
+    }
+    .bg-load-bar {
+      width: 180px;
+      height: 8px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      border: 1px solid #bae6fd;
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+    .bg-load-bar-fill {
+      height: 100%;
+      width: var(--p, 0%);
+      border-radius: 999px;
+      background: #93c5fd;
+      transition: width .2s ease;
+    }
+
 </style>
 
   <!-- Local vendor scripts (GitHub Pages 同網域) -->
@@ -535,7 +587,8 @@ function monthKeyFromISO(iso){
             <button class="seg-btn active" type="button" data-kpi-single="sales">營業額</button>
             <button class="seg-btn" type="button" data-kpi-single="scrapAmt">報廢額</button>
             <button class="seg-btn" type="button" data-kpi-single="scrapRate">報廢率</button>
-            <button class="seg-btn" type="button" data-kpi-single="overuseAmt">超用額</button>
+            <button class="seg-btn" type="button" data-kpi-single="overuseAmt">超用金額(多展-報廢)</button>
+            <button class="seg-btn hidden" type="button" data-kpi-single="overuseAmtB">超用金額B(多展-報廢)</button>
             <button class="seg-btn" type="button" data-kpi-single="overuseRate">超用率</button>
           </div>
         </div>
@@ -795,7 +848,8 @@ function monthKeyFromISO(iso){
                 <button class="seg-btn" type="button" data-item-single="diffRate">差異率</button>
                 <button class="seg-btn" type="button" data-item-single="scrapAmt">報廢金額</button>
                 <button class="seg-btn" type="button" data-item-single="scrapRate">報廢率</button>
-                <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額</button>
+                <button class="seg-btn" type="button" data-item-single="overuseAmt">超用金額(多展-報廢)</button>
+                <button class="seg-btn hidden" type="button" data-item-single="overuseAmtB">超用金額B(多展-報廢)</button>
                 <button class="seg-btn" type="button" data-item-single="overuseRate">超用率</button>
                 <button class="seg-btn" type="button" data-item-single="refillQty">補單量</button>
                 <button class="seg-btn" type="button" data-item-single="refillRateNew">補單率</button>
@@ -837,7 +891,7 @@ function monthKeyFromISO(iso){
                       <th id="detailScrapQtyHeader" class="text-right">報廢量</th>
                       <th class="text-right">報廢金額</th>
                       <th id="detailOveruseQtyHeader" class="text-right">超用量</th>
-                      <th class="text-right">超用金額</th>
+                      <th class="text-right">超用金額(多展-報廢)</th>
                     </tr>
                   </thead>
                   <tbody id="detailTbody"></tbody>
@@ -2895,24 +2949,30 @@ function startBackgroundLoadRemainingMonths(){
   if (!remaining.length) return;
 
   state._backgroundMonthLoading = true;
+  setBackgroundBarProgress(0, remaining.length, `背景載入其他月份資料（0/${remaining.length}）`);
   (async () => {
+    let done = 0;
     for (const mk of remaining) {
-      if (state.loadedMonthKeys.has(mk)) continue;
+      if (state.loadedMonthKeys.has(mk)) {
+        done += 1;
+        setBackgroundBarProgress(done, remaining.length, `背景載入其他月份資料（${done}/${remaining.length}）`);
+        continue;
+      }
       try {
         await ensureDataForMonthKeys([mk], {background:true});
       } catch (e) {
         console.warn('背景月份載入失敗：' + mk, e);
       }
+      done += 1;
+      setBackgroundBarProgress(done, remaining.length, `背景載入其他月份資料（${done}/${remaining.length}）`);
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     state._backgroundMonthLoading = false;
-    const el = $('dataStatus');
-    if (el) {
-      const failCount = Array.isArray(state.loadErrors) ? state.loadErrors.length : 0;
-      el.textContent = failCount
-        ? `背景載入完成（已載入 ${state.loadedMonthKeys.size} 個月份，部分檔案失敗 ${failCount}）`
-        : `已完成所有月份背景載入（${state.loadedMonthKeys.size} 個月份）`;
-    }
+    const failCount = Array.isArray(state.loadErrors) ? state.loadErrors.length : 0;
+    const msg = failCount
+      ? `背景載入完成（已載入 ${state.loadedMonthKeys.size} 個月份，部分檔案失敗 ${failCount}）`
+      : `已完成所有月份背景載入（${state.loadedMonthKeys.size} 個月份）`;
+    setBackgroundBarProgress(remaining.length, remaining.length, msg);
   })();
 }
 
@@ -2988,6 +3048,7 @@ function dedupeLoadedData(){
 
 async function ensureDataForMonthKeys(monthKeys, options={}){
   const silent = !!(options && options.background);
+  const initialRecent = !!(options && options.initialRecent);
   const need = Array.from(new Set((monthKeys||[]).filter(Boolean))).filter(mk => !state.loadedMonthKeys.has(mk));
   if (!need.length) return;
 
@@ -2998,8 +3059,12 @@ async function ensureDataForMonthKeys(monthKeys, options={}){
   }
 
   if (!silent) {
-    $('dataStatus').innerHTML = `<span class="loader"></span> 載入資料中（${need.join(', ')}）...`;
-    $('dataStatus').classList.add('chip');
+    if (initialRecent) {
+      setCircularLoadProgress(0, `優先載入近三個月資料（0/${files.length}）`);
+    } else {
+      $('dataStatus').innerHTML = `<span class="loader"></span> 載入資料中（${need.join(', ')}）...`;
+      $('dataStatus').classList.add('chip');
+    }
   }
 
   const loadErrors = [];
@@ -3008,7 +3073,8 @@ async function ensureDataForMonthKeys(monthKeys, options={}){
   let reasons = [];
   let top20 = [];
 
-  for (const f of files) {
+  for (let __loadIdx = 0; __loadIdx < files.length; __loadIdx++) {
+    const f = files[__loadIdx];
     try {
       const url = './data/' + encodePath(f);
       if (isWasteFile(f)) {
@@ -3030,6 +3096,9 @@ async function ensureDataForMonthKeys(monthKeys, options={}){
       console.warn(e);
       loadErrors.push(f);
     }
+    if (!silent && initialRecent) {
+      setCircularLoadProgress(((__loadIdx + 1) / files.length) * 100, `優先載入近三個月資料（${__loadIdx + 1}/${files.length}）`);
+    }
   }
 
   state.summary = (state.summary || []).concat(sum);
@@ -3044,7 +3113,12 @@ async function ensureDataForMonthKeys(monthKeys, options={}){
   state.loadErrors = Array.from(new Set((state.loadErrors || []).concat(loadErrors)));
 
   if (!silent) {
-    if (loadErrors.length) {
+    if (initialRecent) {
+      const msg = loadErrors.length
+        ? `近三個月資料載入完成（部分失敗 ${loadErrors.length}）`
+        : `近三個月資料載入完成（${need.join(', ')}）`;
+      setCircularLoadProgress(100, msg);
+    } else if (loadErrors.length) {
       $('dataStatus').textContent = `資料已載入（部分失敗 ${loadErrors.length}）`;
     } else {
       $('dataStatus').textContent = `資料已載入（${state.loadedMonthKeys.size} 個月份）`;
@@ -3426,7 +3500,7 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
 
   const ensureBucket = (k) => {
     if (!buckets.has(k)) {
-      buckets.set(k, { k, n: 0, sales: 0, scrapAmt: 0, overuseAmt: 0, topScrapAmt: 0, topOverAmt: 0, sharedAmt: 0 });
+      buckets.set(k, { k, n: 0, sales: 0, scrapAmt: 0, overuseAmt: 0, overuseAmtB: 0, topScrapAmt: 0, topOverAmt: 0, sharedAmt: 0 });
     }
     return buckets.get(k);
   };
@@ -3452,6 +3526,7 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     b.sales     += (Number(r.sales) || 0);
     b.scrapAmt  += (Number(r.scrapAmt) || 0);
     b.overuseAmt+= (Number(r.overuseAmt) || 0);
+    b.overuseAmtB+= overuseAmtBValue(r);
     b.topScrapAmt += (Number(r.topScrapAmt) || 0);
     b.topOverAmt  += (Number(r.topOverAmt) || 0);
     b.sharedAmt   += (Number(r.sharedAmt) || 0);
@@ -3485,7 +3560,7 @@ function aggregateSeries(rows, metric, gran, start = null, end = null) {
     if (!b) return null;
 
     // 金額類：加總
-    if (['sales','scrapAmt','overuseAmt','topScrapAmt','topOverAmt','sharedAmt'].includes(metric)) {
+    if (['sales','scrapAmt','overuseAmt','overuseAmtB','topScrapAmt','topOverAmt','sharedAmt'].includes(metric)) {
       return Number(b[metric]) || 0;
     }
 
@@ -3619,6 +3694,29 @@ function shouldUsePostMayOveruseLayout(rows){
   return isMay2026OrLaterRange() || !!state._forceMayGroupLayout || (Array.isArray(rows) && rows.some(r => safeStr(r && r.date) >= '2026-05-01'));
 }
 
+function getOveruseAmtLabel(rows){
+  return shouldUsePostMayOveruseLayout(rows) ? '超用金額A(多展)' : '超用金額(多展-報廢)';
+}
+function getOveruseAmtBLabel(){
+  return '超用金額B(多展-報廢)';
+}
+function overuseAmtBValue(row){
+  return (Number(row && row.overuseAmt) || 0) - (Number(row && row.scrapAmt) || 0);
+}
+function syncOveruseMetricLabels(rows){
+  const usePostMay = shouldUsePostMayOveruseLayout(rows);
+  const aLabel = usePostMay ? '超用金額A(多展)' : '超用金額(多展-報廢)';
+  document.querySelectorAll('button[data-kpi-single="overuseAmt"]').forEach(btn => { btn.textContent = aLabel; });
+  document.querySelectorAll('button[data-item-single="overuseAmt"]').forEach(btn => { btn.textContent = aLabel; });
+  document.querySelectorAll('button[data-kpi-single="overuseAmtB"], button[data-item-single="overuseAmtB"]').forEach(btn => {
+    btn.textContent = getOveruseAmtBLabel();
+    btn.classList.toggle('hidden', !usePostMay);
+    btn.style.display = usePostMay ? '' : 'none';
+  });
+  if (!usePostMay && state.kpiSelected && state.kpiSelected[0] === 'overuseAmtB') state.kpiSelected = ['overuseAmt'];
+  if (!usePostMay && state.itemMetricSelected === 'overuseAmtB') state.itemMetricSelected = 'overuseAmt';
+}
+
 function updateKPICards(srows) {
   const sum = (k) => srows.reduce((a,b)=>a + (Number(b[k])||0), 0);
 
@@ -3627,6 +3725,7 @@ function updateKPICards(srows) {
   const totalOverAmt = sum('overuseAmt');
   const totalOverAmtB = totalOverAmt - totalScrapAmt;
   const usePostMay = shouldUsePostMayOveruseLayout(srows);
+  syncOveruseMetricLabels(srows);
 
   // 以區間加總後重新計算「整段期間」的比率（避免直接加總每日百分比）
   const scrapRate = (Number.isFinite(totalSales) && totalSales > 0) ? (totalScrapAmt / totalSales) : NaN;
@@ -3815,6 +3914,7 @@ function bindReasonCardClicks(){
 function renderKPIChart(srows, start, end) {
   const gran = aggGranularity(start, end);
 
+  syncOveruseMetricLabels(srows);
   const metric = state.kpiSelected && state.kpiSelected.length ? state.kpiSelected[0] : null;
   if (!metric) return;
 
@@ -3826,7 +3926,8 @@ function renderKPIChart(srows, start, end) {
   const metricMeta = {
     sales: {label:'營業額', kind:'amt'},
     scrapAmt: {label:'報廢額', kind:'amt'},
-    overuseAmt: {label:'超用額', kind:'amt'},
+    overuseAmt: {label:getOveruseAmtLabel(srows), kind:'amt'},
+    overuseAmtB: {label:getOveruseAmtBLabel(), kind:'amt'},
     scrapRate: {label:'報廢率', kind:'rate'},
     overuseRate: {label:'超用率', kind:'rate'},
   };
@@ -4863,6 +4964,7 @@ function renderSelectedItem() {
 function renderItemChart(daily) {
 
   destroyChart('item');
+  syncOveruseMetricLabels(daily);
 
   const metric = state.itemMetricSelected || 'diffAmt';
   const showOrderDemand = !!state.itemShowOrderDemand;
@@ -4926,10 +5028,18 @@ function renderItemChart(daily) {
       tick: (v) => (Number(v) * 100).toFixed(1) + '%'
     },
     overuseAmt: {
-      label: '超用金額',
+      label: getOveruseAmtLabel(daily),
       kind: 'amt',
       unitTitle: 'NT$',
       get: (r) => r.overuseAmt,
+      fmt: (v) => fmtMoney(v),
+      tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
+    },
+    overuseAmtB: {
+      label: getOveruseAmtBLabel(),
+      kind: 'amt',
+      unitTitle: 'NT$',
+      get: (r) => overuseAmtBValue(r),
       fmt: (v) => fmtMoney(v),
       tick: (v) => Math.round(Number(v)).toLocaleString('zh-TW')
     },
@@ -5199,7 +5309,8 @@ function buildDetailHeaderHTML(useNew, isRate){
       <th id="detailScrapQtyHeader" class="text-right">${expandMode ? (isRate ? '生產實際產出(%)' : '生產實際產出量(kg)') : (isRate ? '報廢率' : '報廢數(kg)')}</th>
       <th class="text-right">${expandMode ? (isRate ? '生產補單率(%)' : '生產補單量') : '報廢金額'}</th>
       <th id="detailOveruseQtyHeader" class="text-right" style="${expandMode ? 'display:none;' : ''}">${isRate ? '超用率' : '超用數(kg)'}</th>
-      <th class="text-right" style="${expandMode ? 'display:none;' : ''}">超用金額</th>
+      <th class="text-right" style="${expandMode ? 'display:none;' : ''}">超用金額A(多展)</th>
+      <th class="text-right" style="${expandMode ? 'display:none;' : ''}">超用金額B(多展-報廢)</th>
       <th class="text-right" style="${expandMode ? '' : 'display:none;'}">${expandMode ? (isRate ? '總產出率(%)' : '總產出(kg)') : ''}</th>
       <th class="whitespace-nowrap">${expandMode ? '差異來自' : '超用來自'}</th>
     `;
@@ -5218,7 +5329,7 @@ function buildDetailHeaderHTML(useNew, isRate){
     <th id="detailScrapQtyHeader" class="text-right">${isRate ? '報廢率' : '報廢量'}</th>
     <th class="text-right">報廢金額</th>
     <th id="detailOveruseQtyHeader" class="text-right">${isRate ? '超用率' : '超用量'}</th>
-    <th class="text-right">超用金額</th>
+    <th class="text-right">超用金額(多展-報廢)</th>
   `;
 }
 
@@ -5277,7 +5388,7 @@ function renderDetailTable(daily) {
   const tbody = $('detailTbody');
   tbody.innerHTML = '';
   let lastPeriodLabel = null;
-  const colspan = useNew ? 12 : 14;
+  const colspan = useNew ? 13 : 14;
   const expandMode = useNew && state.detailNewMetricMode === 'expandOutput';
   for (const r of daily) {
     if (r._periodLabel && r._periodLabel !== lastPeriodLabel) {
@@ -5300,6 +5411,7 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtQtyRateByOrder(r.refillQtyNew, r.order, r.refillRateNew)}</td>
         <td class="text-right mono" style="display:none;"></td>
         <td class="text-right mono" style="display:none;"></td>
+        <td class="text-right mono" style="display:none;"></td>
         <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
         <td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>
       ` : `
@@ -5313,6 +5425,7 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtMoney(r.scrapAmt)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.overuseQty, r.order, r.overuseRate)}</td>
         <td class="text-right mono">${fmtMoney(r.overuseAmt)}</td>
+        <td class="text-right mono">${fmtMoney(overuseAmtBValue(r))}</td>
         <td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>
       `;
     } else {
@@ -5346,8 +5459,8 @@ function exportSelectedCsv() {
   const header = useNew
     ? (expandMode
         ? ['日期','商品名','半成品名','單價','訂單需求', isRate ? '生管展開率(%)' : '生管展開量(kg)', isRate ? '生產實際產出(%)' : '生產實際產出量(kg)', isRate ? '生產補單率(%)' : '生產補單量', isRate ? '總產出率(%)' : '總產出(kg)', '差異來自']
-        : ['日期','商品名','半成品名','單價','訂單需求', isRate ? '總產出率' : '總產出(kg)', isRate ? '報廢率' : '報廢數(kg)','報廢金額', isRate ? '超用率' : '超用數(kg)','超用金額','超用來自'])
-    : ['日期','商品名','半成品名','訂單需求','實際產出','補單','單價','實際生產率', isRate ? '差異率' : '差異量','差異金額', isRate ? '報廢率' : '報廢量','報廢金額', isRate ? '超用率' : '超用量','超用金額'];
+        : ['日期','商品名','半成品名','單價','訂單需求', isRate ? '總產出率' : '總產出(kg)', isRate ? '報廢率' : '報廢數(kg)','報廢金額', isRate ? '超用率' : '超用數(kg)','超用金額A(多展)','超用金額B(多展-報廢)','超用來自'])
+    : ['日期','商品名','半成品名','訂單需求','實際產出','補單','單價','實際生產率', isRate ? '差異率' : '差異量','差異金額', isRate ? '報廢率' : '報廢量','報廢金額', isRate ? '超用率' : '超用量','超用金額(多展-報廢)'];
   const lines = [header.join(',')];
 
   const esc = (s) => {
@@ -5398,6 +5511,7 @@ function exportSelectedCsv() {
         r.scrapAmt ?? '',
         rateOrExplicit(r.overuseQty, r.order, r.overuseRate),
         r.overuseAmt ?? '',
+        overuseAmtBValue(r),
         getOutputSourceLabel(r)
       ]).join(','));
     } else {
@@ -5940,12 +6054,12 @@ async function init(force=false) {
     // 優先載入近三個月，避免預設年別一次讀完整年度造成等待過久。
     const recentMonthKeys = getRecentMonthKeysFromManifest(3);
     if (recentMonthKeys.length) {
-      $('dataStatus').innerHTML = `<span class="loader"></span> 優先載入近三個月資料（${recentMonthKeys.join(', ')}）...`;
+      setCircularLoadProgress(0, `優先載入近三個月資料（${recentMonthKeys.join(', ')}）`);
       setDefaultSelectionToLatestLoadedMonth(recentMonthKeys);
-      await ensureDataForMonthKeys(recentMonthKeys);
+      await ensureDataForMonthKeys(recentMonthKeys, {initialRecent:true});
       buildSelectors();
       setDefaultSelectionToLatestLoadedMonth(recentMonthKeys);
-      $('dataStatus').textContent = `已優先載入近三個月資料（${recentMonthKeys.join(', ')}）`;
+      setCircularLoadProgress(100, `已優先載入近三個月資料（${recentMonthKeys.join(', ')}）`);
     }
 
     wireUI();
