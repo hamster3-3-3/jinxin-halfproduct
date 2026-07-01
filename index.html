@@ -2396,7 +2396,9 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     .filter(sn => {
       const n = String(sn || '').replace(/\s+/g, '');
       if (/各日合計|日別報廢率總表|報廢率總表|前10名|共用類|KPI|名詞定義|下拉式選單|空白/i.test(n)) return false;
-      return n.includes('合計') || n.includes('分析日報') || !!sheetNameToISO(sn);
+      // 日別明細應只讀取「合計」分頁；「分析日報」是前十名原因分析用，欄位後段為原因類別/說明，
+      // 若混入日別明細會造成報廢/超用欄位偏移或重複列。
+      return n.includes('合計') || !!sheetNameToISO(sn);
     })
     .map(sn => ({ sn, fixedISO: sheetNameToISO(sn) }));
 
