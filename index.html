@@ -2241,7 +2241,9 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
     for (let i = 0; i < scanMax; i++) {
       const row = aoa[i] || [];
       const rowStr = row.map(c => norm(c)).join('|');
-      if (rowStr.includes('資料登錄日') && rowStr.includes('商品名稱') && rowStr.includes('半成品名稱') && rowStr.includes('訂單需求') && rowStr.includes('總產出')) {
+      // 「分析日報」只有報廢前十名欄位，沒有完整超用欄位；
+      // 日別明細必須解析完整的「合計」格式（含總產出、報廢、超用）。
+      if (rowStr.includes('資料登錄日') && rowStr.includes('商品名稱') && rowStr.includes('半成品名稱') && rowStr.includes('訂單需求') && rowStr.includes('總產出') && rowStr.includes('報廢') && rowStr.includes('超用')) {
         hRow = i;
         break;
       }
@@ -2295,7 +2297,10 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
       if (top.includes('超用') && (sub === '元' || sub.includes('金額')) && idx.overuseAmt == null) idx.overuseAmt = j;
     }
 
-    if (idx.product == null || idx.semi == null || idx.order == null || idx.outputKg == null) return [];
+    if (
+      idx.product == null || idx.semi == null || idx.order == null || idx.outputKg == null ||
+      idx.scrapQty == null || idx.scrapAmt == null || idx.overuseQty == null || idx.overuseAmt == null
+    ) return [];
 
     const rows = [];
     let blankStreak = 0;
@@ -2395,9 +2400,8 @@ function parseDetailsFromWB(wb, fileNameOrMeta) {
   const candidateSheets = wb.SheetNames
     .filter(sn => {
       const n = String(sn || '').replace(/\s+/g, '');
-      if (/各日合計|日別報廢率總表|報廢率總表|前10名|共用類|KPI|名詞定義|下拉式選單|空白/i.test(n)) return false;
-      // 日別明細應只讀取「合計」分頁；「分析日報」是前十名原因分析用，欄位後段為原因類別/說明，
-      // 若混入日別明細會造成報廢/超用欄位偏移或重複列。
+      // 「分析日報」是報廢前十名／原因用，欄位不含完整超用資料，不能混入日別明細。
+      if (/各日合計|日別報廢率總表|報廢率總表|前10名|共用類|KPI|名詞定義|下拉式選單|空白|分析日報/i.test(n)) return false;
       return n.includes('合計') || !!sheetNameToISO(sn);
     })
     .map(sn => ({ sn, fixedISO: sheetNameToISO(sn) }));
@@ -3130,7 +3134,20 @@ function dedupeLoadedData(){
   }
   state.summary = Array.from(sm.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
-  state.details = (state.details||[]).sort((a,b)=>safeLocaleCompare(a.date,b.date));
+  const dm = new Map();
+  for (const r of (state.details||[])) {
+    if (!r || !r.date) continue;
+    const k = [
+      r.date, normKey(r.product), normKey(r.semi),
+      Number(r.order) || 0, Number(r.output) || 0,
+      Number(r.expandQty) || 0, Number(r.actualQty) || 0, Number(r.refillQtyNew) || 0,
+      Number(r.scrapQty) || 0, Number(r.scrapAmt) || 0,
+      Number(r.overuseQty) || 0, Number(r.overuseAmt) || 0,
+      r._detailFormat || ''
+    ].join('|');
+    if (!dm.has(k)) dm.set(k, r);
+  }
+  state.details = Array.from(dm.values()).sort((a,b)=>safeLocaleCompare(a.date,b.date));
 
   const rm = new Map();
   for (const r of (state.reasonWeeks||[])) {
@@ -5453,6 +5470,12 @@ function fmtOutputQtyRate(row){
   return fmtInt(row.output);
 }
 
+function fmtDetailDate(dateISO){
+  const s = safeStr(dateISO).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(5);
+  return s || '—';
+}
+
 function getOutputSourceLabel(row){
   const refill = Number(row?.refillQtyNew ?? row?.refill ?? row?.refillQty ?? 0);
   return refill > 0 ? '補單' : '多產出';
@@ -5497,10 +5520,10 @@ function renderDetailTable(daily) {
     const tr = document.createElement('tr');
     if (useNew) {
       tr.innerHTML = expandMode ? `
-        <td class="mono">${r.date}</td>
+        <td class="mono">${fmtDetailDate(r.date)}</td>
         <td>${getProductNameHTML(r.product)}</td>
         <td class="muted">${escapeHTML(r.semi)}</td>
-        <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
+        <td class="text-right mono">${r.price==null?'—':fmtUnitPrice(r.price)}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.expandQty, r.order, r.expandRate)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.actualQty, r.order, r.actualRate)}</td>
@@ -5511,10 +5534,10 @@ function renderDetailTable(daily) {
         <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
         <td class="mono whitespace-nowrap">${getOutputSourceLabel(r)}</td>
       ` : `
-        <td class="mono">${r.date}</td>
+        <td class="mono">${fmtDetailDate(r.date)}</td>
         <td>${getProductNameHTML(r.product)}</td>
         <td class="muted">${escapeHTML(r.semi)}</td>
-        <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
+        <td class="text-right mono">${r.price==null?'—':fmtUnitPrice(r.price)}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtOutputQtyRate(r)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.scrapQty, r.order, r.scrapRate)}</td>
@@ -5526,13 +5549,13 @@ function renderDetailTable(daily) {
       `;
     } else {
       tr.innerHTML = `
-        <td class="mono">${r.date}</td>
+        <td class="mono">${fmtDetailDate(r.date)}</td>
         <td>${getProductNameHTML(r.product)}</td>
         <td class="muted">${escapeHTML(r.semi)}</td>
         <td class="text-right mono">${fmtInt(r.order)}</td>
         <td class="text-right mono">${fmtInt(r.output)}</td>
         <td class="text-right mono">${fmtInt(r.refill)}</td>
-        <td class="text-right mono">${r.price==null?'—':fmtMoney(r.price).replace('NT$ ','')}</td>
+        <td class="text-right mono">${r.price==null?'—':fmtUnitPrice(r.price)}</td>
         <td class="text-right mono">${r.prodRate==null?'—':fmtPct(r.prodRate)}</td>
         <td class="text-right mono">${fmtQtyRateByOrder(r.diffQty, r.order)}</td>
         <td class="text-right mono">${fmtMoney(r.diffAmt)}</td>
