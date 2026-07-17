@@ -1739,7 +1739,6 @@ function parseSummaryFromWB(wb, fileName) {
   if (hRow < 0) return [];
 
   const header = (rows[hRow] || []).map(normalizeHeader);
-  const sub = (rows[hRow+1] || []).map(normalizeHeader);
 
   const findIdx = (predicate) => header.findIndex(predicate);
 
@@ -1751,6 +1750,17 @@ function parseSummaryFromWB(wb, fileName) {
   const idxScrapRate = findIdx(h => h.includes('報廢率'));
   const idxOverAmt = findIdx(h => h.includes('超用') && !h.includes('率') && (h.includes('額') || h.includes('金額')));
   const idxOverRate = findIdx(h => h.includes('超用率'));
+
+  // 日別總表有兩種格式：
+  // 1. 多層表頭：日期列下方另有「金額總計／構成比」子表頭。
+  // 2. 單層表頭：標題下一列直接就是第一天資料（本檔即為 2026/07/01）。
+  // 舊邏輯固定從 hRow+2 開始，會把單層表頭的第一天誤當子表頭而跳過。
+  const nextRawRow = rows[hRow + 1] || [];
+  const nextDate = idxDate >= 0 ? parseMaybeDate(nextRawRow[idxDate]) : null;
+  const nextRowIsData = nextDate instanceof Date && !isNaN(nextDate);
+  const hasSubHeader = !nextRowIsData;
+  const sub = hasSubHeader ? nextRawRow.map(normalizeHeader) : [];
+  const dataStartRow = hasSubHeader ? hRow + 2 : hRow + 1;
 
   // 多層表頭（廢棄前10名 / 超用前10名 / 共用類廢棄）：
   // header 可能只有第一欄有群組名，第二欄為空；因此用「當欄或前一欄」判斷群組歸屬
@@ -1777,7 +1787,7 @@ function parseSummaryFromWB(wb, fileName) {
   const fileSpanStartISO = fileSpan ? toISO(fileSpan.start) : null;
   const fileSpanEndISO = fileSpan ? toISO(fileSpan.end) : null;
 
-  for (let r=hRow+2;r<rows.length;r++) { // hRow+1 為子表頭
+  for (let r=dataStartRow;r<rows.length;r++) {
     const row = rows[r];
     const d = parseMaybeDate(row[idxDate]);
     if (!d) continue;
