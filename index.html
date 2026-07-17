@@ -2632,80 +2632,78 @@ function rowFindTokenIndex(row, token){
 }
 
 function parseReasonFromWB(wb, fileName){
-  // 穩定版：仍以固定版面解析，但「原因別分析標題」改成掃描整張表，
-  // 不再限定一定要出現在 A 欄，避免 merged cell / 標題偏移時抓不到。
-  const sheetName = findReasonSheetName(wb) || findSheetName(wb, '生產管理報表 7-1') || findSheetName(wb, '生產管理報表7-1') || findSheetName(wb, '7-1');
+  // 新舊版共用解析：
+  // 不再依賴「原因別分析標題往下固定第幾列」，
+  // 而是直接定位每個原因欄，再尋找其下方的「報廢 / 超用」金額列。
+  const sheetName =
+    findReasonSheetName(wb) ||
+    findSheetName(wb, '生產管理報表 7-1') ||
+    findSheetName(wb, '生產管理報表7-1') ||
+    findSheetName(wb, '7-1');
   if (!sheetName) return [];
+
   const ws = wb.Sheets[sheetName];
   if (!ws) return [];
 
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
   if (!rows || !rows.length) return [];
 
-  const fileYear = Number((safeStr(fileName).match(/(20\d{2})/)||[])[1] || '') || null;
+  const fileText = safeStr(fileName);
+  const fileYear = Number((fileText.match(/(20\d{2})/) || [])[1] || '') || null;
 
-  function normTitle(t){
-    return String(t||'').replace(/\s+/g,'')
-      .replace(/[（(]/g,'(').replace(/[）)]/g,')')
-      .replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
-      .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7').replace(/８/g,'8').replace(/９/g,'9')
-      .replace(/[～~—－]/g,'-');
-  }
+  const mmdd = (iso) => {
+    const d = parseISO(iso);
+    if (!(d instanceof Date) || isNaN(d)) return '';
+    return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+  };
 
-  function cellNum(r,c){
-    if(r<0||c<0) return 0;
-    const row = rows[r]||[];
-    const v = row[c];
-    const n = asNumber(v);
-    return Number.isFinite(n) ? n : 0;
-  }
+  function makePeriodInfo(){
+    let startISO = null;
+    let endISO = null;
+    let rangeKey = null;
+    let monthKey = null;
+    let year = fileYear ? String(fileYear) : '';
 
-  function parseRangeFromTitle(title){
-    // 週別原因區塊有時標題只有「原因別分析」，日期只存在於檔名；
-    // 月檔也可能只有 YYYY.MM。這裡同時從標題與檔名推回 rangeKey / monthKey，避免原因卡片全為 0。
-    const titleText = normTitle(title);
-    const fileText = normTitle(fileName);
-    const text = titleText + '|' + fileText;
-    let startISO = null, endISO = null, rangeKey = null, monthKey = null, year = fileYear;
-
-    const mmdd = (iso) => {
-      const d = parseISO(iso);
-      if (!(d instanceof Date) || isNaN(d)) return '';
-      return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
-    };
     const setRange = (baseYear, m1, d1, m2, d2) => {
-      let y1 = Number(baseYear), y2 = Number(baseYear);
-      m1 = Number(m1); d1 = Number(d1); m2 = Number(m2); d2 = Number(d2);
+      let y1 = Number(baseYear);
+      let y2 = Number(baseYear);
+      m1 = Number(m1); d1 = Number(d1);
+      m2 = Number(m2); d2 = Number(d2);
       if (!y1 || !m1 || !d1 || !m2 || !d2) return false;
       if (m1 === 12 && m2 === 1) y2 = y1 + 1;
-      if (m1 === 1 && m2 === 12) y1 = y1 - 1;
       startISO = toISO(new Date(y1, m1-1, d1));
-      endISO   = toISO(new Date(y2, m2-1, d2));
+      endISO = toISO(new Date(y2, m2-1, d2));
       rangeKey = mmdd(startISO) + '-' + mmdd(endISO);
-      monthKey = endISO ? String(endISO).slice(0,7) : null;
+      monthKey = String(endISO).slice(0,7);
       year = String(startISO).slice(0,4);
       return true;
     };
 
-    // A. 標題內日期：原因別分析(5/1-5/3)、原因別分析(5/1-3)
-    let m = text.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})\)/)
-         || text.match(/原因別分析\((\d{1,2})\/(\d{1,2})-(\d{1,2})\)/);
-    if (m && fileYear){
-      if (m.length >= 5 && m[4] != null) setRange(fileYear, m[1], m[2], m[3], m[4]);
-      else setRange(fileYear, m[1], m[2], m[1], m[3]);
+    // 1) 優先從檔名抓週別，例如 2026.0707-0713、2026-0707-0713。
+    let m = fileText.match(/(20\d{2})[.\-_/]?(\d{2})(\d{2})\s*[-~～]\s*(\d{2})(\d{2})/);
+    if (m) setRange(m[1], m[2], m[3], m[4], m[5]);
+
+    // 2) 檔名沒有週別時，從工作表前 20 列抓 7/7-7/13 或 7/7-13。
+    if (!rangeKey && fileYear){
+      const scanText = rows.slice(0, 20)
+        .map(row => (row || []).map(v => safeStr(v)).join('|'))
+        .join('|')
+        .replace(/[～~—－–]/g, '-')
+        .replace(/\s+/g, '');
+
+      m = scanText.match(/(\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})/);
+      if (m) {
+        setRange(fileYear, m[1], m[2], m[3], m[4]);
+      } else {
+        m = scanText.match(/(\d{1,2})\/(\d{1,2})-(\d{1,2})(?!\/)/);
+        if (m) setRange(fileYear, m[1], m[2], m[1], m[3]);
+      }
     }
 
-    // B. 檔名內週別：生產管理報表2026.0501-0503
-    if (!rangeKey){
-      m = fileText.match(/(20\d{2})[.\-_/]?(\d{2})(\d{2})-(\d{2})(\d{2})/);
-      if (m) setRange(m[1], m[2], m[3], m[4], m[5]);
-    }
-
-    // C. 檔名或路徑內月別：生產管理報表2026.05、2026/05/...
+    // 3) 月檔 fallback。
     if (!monthKey){
-      m = fileText.match(/生產管理報表(20\d{2})\.(\d{1,2})(?!\d)/)
-       || fileText.match(/(20\d{2})\/(\d{1,2})\//)
-       || fileText.match(/(20\d{2})[.\-_/](\d{1,2})(?!\d)/);
+      m = fileText.match(/生產管理報表(20\d{2})[.\-_/](\d{1,2})(?!\d)/)
+       || fileText.match(/(20\d{2})\/(\d{1,2})\//);
       if (m){
         const yy = Number(m[1]);
         const mo = Number(m[2]);
@@ -2716,162 +2714,79 @@ function parseReasonFromWB(wb, fileName){
       }
     }
 
-    return { startISO, endISO, rangeKey, monthKey, year };
+    return {startISO, endISO, rangeKey, monthKey, year};
   }
 
-  function findNearestReasonInfo(rowIndex){
-    for (let r=rowIndex; r>=0 && r>=rowIndex-12; r--){
-      const txt = (rows[r]||[]).map(normTitle).filter(Boolean).join('|');
-      if (txt.includes('原因別分析')) return parseRangeFromTitle(txt);
-    }
-    return parseRangeFromTitle('');
+  const period = makePeriodInfo();
+
+  function exactKindCell(v){
+    const t = normCell(v);
+    if (t === '報廢') return 'scrap';
+    if (t === '超用') return 'over';
+    return null;
   }
 
-  function reasonLabelFromCell(v){
-    const k = normalizeReasonKey(v);
-    const def = REASON_DEFS.find(d => d.key === k);
-    return def ? def.label : null;
-  }
-
-  function findNearbyAmount(reasonRow, reasonCol, kind){
-    const kw = kind === 'scrap' ? '報廢' : '超用';
-    const colPriority = [reasonCol, reasonCol+1, reasonCol-1, reasonCol+2, reasonCol-2].filter(c => c >= 0);
-    for (let r=reasonRow; r<Math.min(rows.length, reasonRow+10); r++){
-      const row = rows[r] || [];
-      const rowText = row.map(normCell).join('|');
-      if (!rowText.includes(kw)) continue;
-      for (const c of colPriority){
-        const n = asNumber(row[c]);
-        if (Number.isFinite(n)) return n;
+  function findAmountColumn(reasonRow, reasonCol){
+    // 原因通常占兩欄：金額、比例。優先找原因下方對應的「金額」欄。
+    for (let r = reasonRow + 1; r <= Math.min(rows.length - 1, reasonRow + 4); r++){
+      for (const c of [reasonCol, reasonCol-1, reasonCol+1]){
+        if (c < 0) continue;
+        const t = normCell((rows[r] || [])[c]);
+        if (t === '金額' || t.includes('金額')) return c;
       }
     }
-    return 0;
+    return reasonCol;
   }
 
-  function parseReasonDynamicRows(){
-    const dyn = [];
-    const seenDyn = new Set();
-    for (let r=0; r<rows.length; r++){
+  function findKindRow(reasonRow, kind){
+    for (let r = reasonRow + 1; r <= Math.min(rows.length - 1, reasonRow + 12); r++){
       const row = rows[r] || [];
-      for (let c=0; c<row.length; c++){
-        const label = reasonLabelFromCell(row[c]);
-        if (!label) continue;
-        const info = findNearestReasonInfo(r);
-        const rec = {
-          start: info.startISO,
-          end: info.endISO,
-          rangeKey: info.rangeKey,
-          monthKey: info.monthKey,
-          year: String(info.year||fileYear||''),
-          reason: label,
-          scrapAmt: findNearbyAmount(r, c, 'scrap'),
-          overuseAmt: findNearbyAmount(r, c, 'over'),
-          source: safeStr(fileName)
-        };
-        const k = [rec.start, rec.end, rec.rangeKey, rec.monthKey, rec.reason, rec.source].join('|');
-        if (!seenDyn.has(k)){
-          seenDyn.add(k);
-          dyn.push(rec);
-        }
+      for (let c = 0; c < row.length; c++){
+        if (exactKindCell(row[c]) === kind) return r;
       }
     }
-    return dyn;
+    return -1;
   }
 
-  const cols = [5,7,9,11]; // F,H,J,L
-  const labels = [
-    '展開量高於105%', '調理多產', '製程不穩', '取樣不穩',
-    '原物料規格', '研發設定', '其他原因', '步留不足'
-  ];
+  const byReason = new Map();
 
-  const titleRows = [];
-  for(let r=0; r<rows.length; r++){
+  for (let r = 0; r < rows.length; r++){
     const row = rows[r] || [];
-    for(let c=0; c<row.length; c++){
-      const title = normTitle(row[c]);
-      if (title.includes('原因別分析')) {
-        titleRows.push({ rowIndex: r, title });
-        break;
-      }
-    }
-  }
+    for (let c = 0; c < row.length; c++){
+      const reasonKey = normalizeReasonKey(row[c]);
+      const def = REASON_DEFS.find(d => d.key === reasonKey);
+      if (!def) continue;
 
-  const out = [];
-  const seen = new Set();
-  for (const item of titleRows){
-    const startRow = item.rowIndex;
-    const info = parseRangeFromTitle(item.title);
-    const scrap1 = startRow + 6, over1 = startRow + 7;
-    const scrap2 = startRow + 11, over2 = startRow + 12;
+      const amountCol = findAmountColumn(r, c);
+      const scrapRow = findKindRow(r, 'scrap');
+      const overRow = findKindRow(r, 'over');
+      if (scrapRow < 0 && overRow < 0) continue;
 
-    for(let i=0;i<8;i++){
-      const block = (i<4) ? 0 : 1;
-      const idx = (i<4) ? i : i-4;
-      const rS = block===0 ? scrap1 : scrap2;
-      const rO = block===0 ? over1  : over2;
-      const cA = cols[idx];
+      const scrapAmt = scrapRow >= 0 ? asNumber((rows[scrapRow] || [])[amountCol]) : NaN;
+      const overuseAmt = overRow >= 0 ? asNumber((rows[overRow] || [])[amountCol]) : NaN;
+
       const rec = {
-        start: info.startISO,
-        end: info.endISO,
-        rangeKey: info.rangeKey,
-        monthKey: info.monthKey,
-        year: String(info.year||''),
-        reason: labels[i],
-        scrapAmt: cellNum(rS, cA),
-        overuseAmt: cellNum(rO, cA),
-        source: safeStr(fileName)
+        start: period.startISO,
+        end: period.endISO,
+        rangeKey: period.rangeKey,
+        monthKey: period.monthKey,
+        year: String(period.year || fileYear || ''),
+        reason: def.label,
+        scrapAmt: Number.isFinite(scrapAmt) ? scrapAmt : 0,
+        overuseAmt: Number.isFinite(overuseAmt) ? overuseAmt : 0,
+        source: fileText
       };
-      const k = [rec.start, rec.end, rec.reason, rec.source].join('|');
-      if (!seen.has(k)) {
-        seen.add(k);
-        out.push(rec);
-      }
+
+      // 同一原因若因合併儲存格或重複標題被掃到多次，保留金額較完整的一筆。
+      const old = byReason.get(def.key);
+      const oldScore = old ? Math.abs(Number(old.scrapAmt)||0) + Math.abs(Number(old.overuseAmt)||0) : -1;
+      const newScore = Math.abs(Number(rec.scrapAmt)||0) + Math.abs(Number(rec.overuseAmt)||0);
+      if (!old || newScore > oldScore) byReason.set(def.key, rec);
     }
   }
 
-  // 若完全沒找到標題列，但檔名本身是週檔，仍嘗試用第一個「原因別分析」關鍵字所在列做一次解析
-  if (!out.length){
-    let fallbackRow = -1;
-    for(let r=0; r<rows.length && fallbackRow < 0; r++){
-      const row = rows[r] || [];
-      for(let c=0; c<row.length; c++){
-        const t = normTitle(row[c]);
-        if (t.includes('原因別分析')) { fallbackRow = r; break; }
-      }
-    }
-    if (fallbackRow >= 0){
-      const info = parseRangeFromTitle(normTitle(fileName));
-      const scrap1 = fallbackRow + 6, over1 = fallbackRow + 7;
-      const scrap2 = fallbackRow + 11, over2 = fallbackRow + 12;
-      for(let i=0;i<8;i++){
-        const block = (i<4) ? 0 : 1;
-        const idx = (i<4) ? i : i-4;
-        const rS = block===0 ? scrap1 : scrap2;
-        const rO = block===0 ? over1  : over2;
-        const cA = cols[idx];
-        out.push({
-          start: info.startISO,
-          end: info.endISO,
-          rangeKey: info.rangeKey,
-          monthKey: info.monthKey,
-          year: String(info.year||''),
-          reason: labels[i],
-          scrapAmt: cellNum(rS, cA),
-          overuseAmt: cellNum(rO, cA),
-          source: safeStr(fileName)
-        });
-      }
-    }
-  }
-
-  const fixedTotal = out.reduce((a,b)=>a+(Number(b.scrapAmt)||0)+(Number(b.overuseAmt)||0),0);
-  const dyn = parseReasonDynamicRows();
-  const dynTotal = dyn.reduce((a,b)=>a+(Number(b.scrapAmt)||0)+(Number(b.overuseAmt)||0),0);
-  if (dyn.length && (fixedTotal === 0 || dynTotal > fixedTotal)) return dyn;
-  return out;
+  return Array.from(byReason.values());
 }
-
-
 
 
 function monthKeyFromDateObj(d){
