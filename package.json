@@ -1,0 +1,13 @@
+{
+  "name": "jinxin-halfproduct-data-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Convert dashboard Excel workbooks into compact pre-parsed JSON.",
+  "scripts": {
+    "convert:data": "node scripts/convert-excel-to-json.cjs",
+    "check:data": "node scripts/check-json-data.cjs"
+  },
+  "dependencies": {
+    "xlsx": "0.18.5"
+  }
+}

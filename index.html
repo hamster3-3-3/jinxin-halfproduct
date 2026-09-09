@@ -497,7 +497,6 @@ function monthKeyFromISO(iso){
 </style>
 
   <!-- Local vendor scripts (GitHub Pages 同網域) -->
-  <script src="./xlsx.full.min.js"></script>
   <script src="./chart.umd.min.js"></script>
 </head>
 
@@ -991,7 +990,11 @@ const state = {
   monthLoadPromises: new Map(),
   manifestIntervals: [],
   loadErrors: [],
-  launchPromise: null
+  launchPromise: null,
+  jsonFiles: new Map(),
+  jsonHits: 0,
+  jsonFallbacks: 0,
+  xlsxReadyPromise: null
 
 };
 const $ = (id) => document.getElementById(id);
@@ -1259,12 +1262,17 @@ async function buildLaunchMapFromDailyFiles(files){
   let lastErr = null;
   for (const f of (files || []).filter(isWasteFile)){
     try{
-      const url = './data/' + encodePath(f);
-      const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + f);
-      const ab = await r.arrayBuffer();
-      const wb = XLSX.read(ab, {type:'array', cellDates:true});
-      const rows = parseDetailsFromWB(wb, f);
+      const cached = await loadPreparsedJson(f);
+      let rows = cached && Array.isArray(cached.details) ? cached.details : null;
+      if (!rows){
+        await ensureXlsxReady();
+        const url = './data/' + encodePath(f);
+        const r = await fetchWithTimeout(url, {cache:'force-cache'}, 20000);
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + f);
+        const ab = await r.arrayBuffer();
+        const wb = XLSX.read(ab, {type:'array', cellDates:true});
+        rows = parseDetailsFromWB(wb, f);
+      }
       for (const row of rows){
         const product = safeStr(row && row.product).trim();
         const firstDate = parseISO(row && row.date);
@@ -1468,17 +1476,65 @@ async function loadManifest() {
   return [];
 }
 
+async function loadJsonManifest(){
+  state.jsonFiles = new Map();
+  try{
+    const r = await fetchWithTimeout('./data/json-manifest.json', {cache:'no-cache'}, 10000);
+    if (!r.ok) return false;
+    const j = await r.json();
+    if (!j || !j.files || typeof j.files !== 'object') return false;
+    state.jsonFiles = new Map(Object.entries(j.files));
+    return state.jsonFiles.size > 0;
+  }catch(e){
+    console.warn('精簡 JSON 索引尚未提供，改用 Excel：', e);
+    return false;
+  }
+}
+
+async function loadPreparsedJson(sourcePath){
+  const entry = state.jsonFiles instanceof Map ? state.jsonFiles.get(sourcePath) : null;
+  if (!entry || !entry.json) return null;
+  try{
+    const version = entry.sourceSha256 ? '?v=' + encodeURIComponent(entry.sourceSha256.slice(0, 16)) : '';
+    const url = './data/' + encodePath(entry.json) + version;
+    const r = await fetchWithTimeout(url, {cache:'force-cache'}, 12000);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const payload = await r.json();
+    if (!payload || payload.source !== sourcePath) throw new Error('來源檔案不一致');
+    state.jsonHits = (state.jsonHits || 0) + 1;
+    return payload;
+  }catch(e){
+    state.jsonFallbacks = (state.jsonFallbacks || 0) + 1;
+    console.warn('精簡 JSON 讀取失敗，改用 Excel：', sourcePath, e);
+    return null;
+  }
+}
+
+async function ensureXlsxReady(){
+  if (window.XLSX) return true;
+  if (!state.xlsxReadyPromise){
+    state.xlsxReadyPromise = ensureLibGlobal('XLSX', [
+      './xlsx.full.min.js',
+      'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
+    ]).catch(e => {
+      state.xlsxReadyPromise = null;
+      throw e;
+    });
+  }
+  return state.xlsxReadyPromise;
+}
+
 // ---------------- JFM 檔名索引（週別 / 月別） ----------------
 function baseName(p){ return String(p || '').split('/').pop(); }
 
 function isJfmFile(p){
   const n = baseName(p);
   // JFM 檔名有時不會帶「【JFM指導】」，但只要是「生產管理報表」且不是半成品日報/報廢表，就需要載入原因別分析(7-1)。
-  return /生產管理報表/.test(n) && /\.xlsx$/i.test(n) && !/(半成品|報廢管理|生產日報|點檢|檢測)/.test(n);
+  return /生產管理報表/.test(n) && /\.(xlsx|xlsm|xls)$/i.test(n) && !/(半成品|報廢管理|生產日報|點檢|檢測)/.test(n);
 }
 function isWasteFile(p){
   const n = baseName(p);
-  return /(晉欣半成品報廢管理表|鮮食廠[_－-]?半成品生產管理日報).*\.xlsx$/i.test(n);
+  return /(晉欣半成品報廢管理表|鮮食廠[_－-]?半成品生產管理日報).*\.(xlsx|xlsm|xls)$/i.test(n);
 }
 
 function toMMDD(d){
@@ -3114,21 +3170,35 @@ async function ensureDataForMonthKeys(monthKeys, options={}){
   for (let __loadIdx = 0; __loadIdx < files.length; __loadIdx++) {
     const f = files[__loadIdx];
     try {
-      const url = './data/' + encodePath(f);
+      const cached = await loadPreparsedJson(f);
       if (isWasteFile(f)) {
-        const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
-        if (!r.ok) throw new Error('讀取失敗：' + f);
-        const ab = await r.arrayBuffer();
-        const wb = XLSX.read(ab, {type:'array', cellDates:true});
-        sum = sum.concat(parseSummaryFromWB(wb, f));
-        det = det.concat(parseDetailsFromWB(wb, f));
+        if (cached){
+          sum = sum.concat(Array.isArray(cached.summary) ? cached.summary : []);
+          det = det.concat(Array.isArray(cached.details) ? cached.details : []);
+        }else{
+          await ensureXlsxReady();
+          const url = './data/' + encodePath(f);
+          const r = await fetchWithTimeout(url, {cache:'force-cache'}, 20000);
+          if (!r.ok) throw new Error('讀取失敗：' + f);
+          const ab = await r.arrayBuffer();
+          const wb = XLSX.read(ab, {type:'array', cellDates:true});
+          sum = sum.concat(parseSummaryFromWB(wb, f));
+          det = det.concat(parseDetailsFromWB(wb, f));
+        }
       } else if (isJfmFile(f)) {
-        const r = await fetchWithTimeout(url, {cache:'no-store'}, 20000);
-        if (!r.ok) throw new Error('讀取失敗：' + f);
-        const ab = await r.arrayBuffer();
-        const wb = XLSX.read(ab, {type:'array', cellDates:true});
-        reasons = reasons.concat(parseReasonFromWB(wb, f));
-        top20 = top20.concat(parseTop20FromWB(wb, f));
+        if (cached){
+          reasons = reasons.concat(Array.isArray(cached.reasonWeeks) ? cached.reasonWeeks : []);
+          top20 = top20.concat(Array.isArray(cached.top20Entries) ? cached.top20Entries : []);
+        }else{
+          await ensureXlsxReady();
+          const url = './data/' + encodePath(f);
+          const r = await fetchWithTimeout(url, {cache:'force-cache'}, 20000);
+          if (!r.ok) throw new Error('讀取失敗：' + f);
+          const ab = await r.arrayBuffer();
+          const wb = XLSX.read(ab, {type:'array', cellDates:true});
+          reasons = reasons.concat(parseReasonFromWB(wb, f));
+          top20 = top20.concat(parseTop20FromWB(wb, f));
+        }
       }
     } catch (e) {
       console.warn(e);
@@ -3181,21 +3251,24 @@ async function loadAllData() {
   $('dataStatus').classList.remove('chip');
   $('dataStatus').classList.add('chip');
 
-  await ensureLibGlobal('XLSX', [
-    './xlsx.full.min.js',
-    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
-  ]);
-  await ensureLibGlobal('Chart', [
+  // 資料索引、精簡 JSON 索引與圖表函式庫平行載入。
+  // SheetJS 僅在 JSON 缺失或損壞、需要回退 Excel 時才延遲下載。
+  const [files] = await Promise.all([
+    loadManifest(),
+    loadJsonManifest(),
+    ensureLibGlobal('Chart', [
     './chart.umd.min.js',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js'
+    ])
   ]);
 
   state.launchPromise = null;
 
-  const files = await loadManifest();
   if (!files.length) throw new Error('manifest 無任何檔案');
   state.manifestFiles = files.slice();
+  state.jsonHits = 0;
+  state.jsonFallbacks = 0;
 
   const wasteFiles = files.filter(isWasteFile);
   const jfmFiles = files.filter(isJfmFile);
