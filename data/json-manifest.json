@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-16T03:37:18.355Z",
+  "generatedAt": "2026-09-30T08:56:47.464Z",
   "parserHash": "b78685ceb2eaacd2c87009379183dcf916d317001e4261725f3eb30afbb8d0a5",
   "files": {
     "2025/08/【JFM指導】晉欣廠生產管理報表2025.08.XLSX": {
@@ -839,14 +839,14 @@
       "reasonRows": 7,
       "top20Rows": 40
     },
-    "2026/09/2026-0901-0914晉欣半成品報廢管理表.xlsx": {
-      "json": "../data-json/2026/09/2026-0901-0914晉欣半成品報廢管理表.json",
+    "2026/09/2026-0901-0921晉欣半成品報廢管理表.xlsx": {
+      "json": "../data-json/2026/09/2026-0901-0921晉欣半成品報廢管理表.json",
       "kind": "waste",
-      "sourceSha256": "24d24f4c53f20bacd91a17750940b774614154332ed907188aacecce838716de",
-      "sourceBytes": 4912810,
-      "jsonBytes": 2732260,
-      "summaryRows": 14,
-      "detailRows": 5272,
+      "sourceSha256": "eab1c1761982133e7977a4bb4acd4d83fe7ec54bdbc9fe8bf294b9bb46c780c8",
+      "sourceBytes": 7692247,
+      "jsonBytes": 4099884,
+      "summaryRows": 21,
+      "detailRows": 7839,
       "reasonRows": 0,
       "top20Rows": 0
     }
