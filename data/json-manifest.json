@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-30T09:04:31.253Z",
+  "generatedAt": "2026-10-02T09:00:53.668Z",
   "parserHash": "b78685ceb2eaacd2c87009379183dcf916d317001e4261725f3eb30afbb8d0a5",
   "files": {
     "2025/08/【JFM指導】晉欣廠生產管理報表2025.08.XLSX": {
@@ -834,6 +834,39 @@
       "sourceSha256": "01e87ed2fe8b761f1360177ca1879e6b63135b7f71eb53bc3323eb020453125d",
       "sourceBytes": 748430,
       "jsonBytes": 20373,
+      "summaryRows": 0,
+      "detailRows": 0,
+      "reasonRows": 7,
+      "top20Rows": 40
+    },
+    "2026/09/【JFM指導】晉欣廠生產管理報表2026.0908-0914.xlsx": {
+      "json": "../data-json/2026/09/【JFM指導】晉欣廠生產管理報表2026.0908-0914.json",
+      "kind": "jfm",
+      "sourceSha256": "c02b50c03f9e1215357364a3ee5645c4847abfa4c6ed6fcb8633f581353a0fbb",
+      "sourceBytes": 835127,
+      "jsonBytes": 20270,
+      "summaryRows": 0,
+      "detailRows": 0,
+      "reasonRows": 7,
+      "top20Rows": 40
+    },
+    "2026/09/【JFM指導】晉欣廠生產管理報表2026.0915-0921.xlsx": {
+      "json": "../data-json/2026/09/【JFM指導】晉欣廠生產管理報表2026.0915-0921.json",
+      "kind": "jfm",
+      "sourceSha256": "4746e812dcd2ba2b4aedf027bf63c5adf527e770f568fe52a8e6245d71551d57",
+      "sourceBytes": 875826,
+      "jsonBytes": 19982,
+      "summaryRows": 0,
+      "detailRows": 0,
+      "reasonRows": 7,
+      "top20Rows": 40
+    },
+    "2026/09/【JFM指導】晉欣廠生產管理報表2026.0922-0928.xlsx": {
+      "json": "../data-json/2026/09/【JFM指導】晉欣廠生產管理報表2026.0922-0928.json",
+      "kind": "jfm",
+      "sourceSha256": "cb27f9fcb2b1cbb97937b109088448d20290aaff121219871efd6f39fc65b20e",
+      "sourceBytes": 916644,
+      "jsonBytes": 20400,
       "summaryRows": 0,
       "detailRows": 0,
       "reasonRows": 7,
