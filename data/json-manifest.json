@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-02T09:00:53.668Z",
+  "generatedAt": "2026-10-08T08:11:56.039Z",
   "parserHash": "b78685ceb2eaacd2c87009379183dcf916d317001e4261725f3eb30afbb8d0a5",
   "files": {
     "2025/08/【JFM指導】晉欣廠生產管理報表2025.08.XLSX": {
@@ -872,14 +872,25 @@
       "reasonRows": 7,
       "top20Rows": 40
     },
-    "2026/09/2026-0901-0928晉欣半成品報廢管理表.xlsx": {
-      "json": "../data-json/2026/09/2026-0901-0928晉欣半成品報廢管理表.json",
+    "2026/09/2026-0901-0930晉欣半成品報廢管理表.xlsx": {
+      "json": "../data-json/2026/09/2026-0901-0930晉欣半成品報廢管理表.json",
       "kind": "waste",
-      "sourceSha256": "c4e0f365dc3275e8804b43829d9262b6a2f7899d5830ce99a7e2ffa829b5208f",
-      "sourceBytes": 9878150,
-      "jsonBytes": 5458575,
-      "summaryRows": 28,
-      "detailRows": 10391,
+      "sourceSha256": "ae427eeda2791e994ee9e5705be1bdcb81a074ef64bdebfbf7a620d40250f365",
+      "sourceBytes": 10521988,
+      "jsonBytes": 5867492,
+      "summaryRows": 30,
+      "detailRows": 11159,
+      "reasonRows": 0,
+      "top20Rows": 0
+    },
+    "2026/10/2026-1001-1005晉欣半成品報廢管理表.xlsx": {
+      "json": "../data-json/2026/10/2026-1001-1005晉欣半成品報廢管理表.json",
+      "kind": "waste",
+      "sourceSha256": "423ea312a74cd4a37968041ffdd803cba444d3a28bbcc74c1772a4efdc58aa2b",
+      "sourceBytes": 2768670,
+      "jsonBytes": 1018974,
+      "summaryRows": 7,
+      "detailRows": 1917,
       "reasonRows": 0,
       "top20Rows": 0
     }
